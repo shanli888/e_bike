@@ -1,0 +1,20 @@
+top: asm(0KB), ida_script(0KB), blutter_frida.js(344KB), objs.txt(362KB), pp.txt(2067KB)
+asm pkgs: .dart_tool, auto_size_text, cached_network_image, cached_network_image_platform_interface, catcher, characters, clock, collection, connectivity_plus, connectivity_plus_linux, connectivity_plus_platform_interface, convert, crypto, dbus, device_info_plus, device_info_plus_platform_interface, dio, expandable_page_view, fading_edge_scrollview, ffi, file, flutter, flutter_blue_plus, flutter_cache_manager, flutter_localizations, flutter_screenutil, flutter_smart_dialog, flutter_spinkit, geolocator, geolocator_android, geolocator_apple, geolocator_platform_interface, get, http, http_parser, intl, logging, marquee, nm, nordic_dfu, octo_image, package_info_plus, package_info_plus_platform_interface, path, path_provider, path_provider_android, path_provider_ios, path_provider_linux, path_provider_macos, path_provider_platform_interface, path_provider_windows, permission_handler, permission_handler_platform_interface, platform, plugin_platform_interface, rxdart, shared_preferences, shared_preferences_android, shared_preferences_ios, shared_preferences_linux, shared_preferences_macos, shared_preferences_platform_interface, shared_preferences_windows, source_span, sqflite, sqflite_common, string_scanner, synchronized, term_glyph, typed_data, update_app, url_launcher_android, url_launcher_ios, url_launcher_linux, url_launcher_macos, url_launcher_platform_interface, url_launcher_windows, uuid, vector_math, wakelock, wakelock_macos, wakelock_platform_interface, wakelock_windows, webview_flutter, webview_flutter_android, webview_flutter_platform_interface, webview_flutter_wkwebview, wepower, win32, xdg_directories, xml
+--- wepower/ble tree ---
+asm\wepower\ble\battery_ble_manager.dart  341921
+asm\wepower\ble\ble_manager.dart  949751
+asm\wepower\ble\cadence_ble_manager4.dart  166242
+asm\wepower\ble\cadence_ble_manager5.dart  103289
+asm\wepower\ble\device_ble_manager.dart  220172
+asm\wepower\ble\direct_ble_manager5.dart  217585
+asm\wepower\ble\display_ble_manager5.dart  97905
+asm\wepower\ble\command\CommandQueueUtils.dart  34643
+asm\wepower\ble\command\commands.dart  296448
+asm\wepower\ble\command\commands_json.dart  456851
+asm\wepower\ble\command\command_json_utils.dart  819476
+asm\wepower\ble\command\command_utils.dart  387553
+asm\wepower\ble\command\control_commands_json.dart  67394
+asm\wepower\ble\command\crc16.dart  81360
+asm\wepower\ble\command\OnlineCommandUtils.dart  36158
+asm\wepower\ble\notice\xmode_notice.dart  2214
+asm\wepower\ble\service\we_power_service.dart  54798

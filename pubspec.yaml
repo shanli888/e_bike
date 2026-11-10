@@ -1,0 +1,27 @@
+name: bike_computer
+description: LVBU/WePower 电动助力控制器 - 离线蓝牙版（骑行数据 + 助力控制）
+publish_to: 'none'
+version: 1.6.29+39
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_blue_plus: ^1.31.0
+  permission_handler: ^11.3.0
+  provider: ^6.1.0
+  cupertino_icons: ^1.0.6
+  wakelock_plus: ^1.2.0
+  geolocator: ^13.0.1
+  shared_preferences: ^2.3.2
+  package_info_plus: ^8.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
