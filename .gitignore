@@ -15,6 +15,9 @@
 /docs/setup*.txt
 /docs/btsnoop_att.txt
 
+# 本地工作日志（非项目交付内容）
+.workbuddy/
+
 # Miscellaneous
 *.class
 *.log

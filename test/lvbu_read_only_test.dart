@@ -7,17 +7,21 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   const imei = '123456789012345';
   List<int> bytes(String hex) => [
-    for (var i = 0; i < hex.length; i += 2) int.parse(hex.substring(i, i + 2), radix: 16),
-  ];
+        for (var i = 0; i < hex.length; i += 2)
+          int.parse(hex.substring(i, i + 2), radix: 16),
+      ];
   String header(String code) => '${code}F$imei';
 
   test('只读白名单使用原厂请求，C6 只允许查询参数', () {
-    expect(LvbuReadCommand.values.map((c) => c.code).toSet(), {'C0', 'BF', 'C1', 'B1', 'BD', 'C6'});
+    expect(LvbuReadCommand.values.map((c) => c.code).toSet(),
+        {'C0', 'BF', 'C1', 'B1', 'BD', 'C6'});
     for (final c in LvbuReadCommand.values) {
-      expect(LvbuProtocol.toHex(LvbuReadOnly.request(c, imei)), '${header(c.code)}${c.suffix}');
+      expect(LvbuProtocol.toHex(LvbuReadOnly.request(c, imei)),
+          '${header(c.code)}${c.suffix}');
     }
     expect(LvbuReadCommand.climbing.suffix, '030000');
-    expect(() => LvbuReadOnly.request(LvbuReadCommand.voltage, '12'), throwsArgumentError);
+    expect(() => LvbuReadOnly.request(LvbuReadCommand.voltage, '12'),
+        throwsArgumentError);
   });
 
   test('速度、电压、负温度和陀螺仪按原厂十进制规则解析', () {
@@ -60,19 +64,26 @@ void main() {
     expect(parser.feed(failed.sublist(0, 10)), isNull);
     expect(parser.feed(failed.sublist(10))?.status, 2);
     final frame = bytes('${header('BF')}010123');
-    expect(parser.feed([...bytes('${header('C0')}010385'), ...frame])?.value, 12.3);
+    expect(parser.feed([...bytes('${header('C0')}010385'), ...frame])?.value,
+        12.3);
     final tripParser = LvbuReadReplyParser(LvbuReadCommand.trip, imei);
     // 累计帧长超出上限的 B1 必须安全丢弃。
     final oversized = bytes('${header('B1')}010000FFFFFF');
     expect(tripParser.feed(oversized), isNull);
   });
 
-  test('电量曲线是原厂估算，边界和中间区间可复现', () {
-    expect(LvbuReadOnly.estimateBatteryPercent(24), 0);
-    expect(LvbuReadOnly.estimateBatteryPercent(41.8), 100);
-    expect(LvbuReadOnly.estimateBatteryPercent(38.45), 75);
-    expect(LvbuReadOnly.estimateBatteryPercent(38.5), 77);
-    expect(() => LvbuReadOnly.estimateBatteryPercent(double.nan), throwsArgumentError);
+  test('电量估算按 36V 电池曲线：30V 空电、42V 满电、段内线性插值', () {
+    expect(LvbuReadOnly.estimateBatteryPercent(42), 100);
+    expect(LvbuReadOnly.estimateBatteryPercent(43), 100); // 高于满电
+    expect(LvbuReadOnly.estimateBatteryPercent(30), 0);
+    expect(LvbuReadOnly.estimateBatteryPercent(24), 0); // 低于空电
+    expect(LvbuReadOnly.estimateBatteryPercent(37), 50);
+    expect(LvbuReadOnly.estimateBatteryPercent(40), 80);
+    expect(LvbuReadOnly.estimateBatteryPercent(41), 90);
+    expect(LvbuReadOnly.estimateBatteryPercent(38.5), 65); // 不再是阶梯取整
+    expect(LvbuReadOnly.estimateBatteryPercent(41.5), 95);
+    expect(() => LvbuReadOnly.estimateBatteryPercent(double.nan),
+        throwsArgumentError);
   });
 
   testWidgets('单条超时不会饿死低频查询，也不会并发', (tester) async {
@@ -143,12 +154,14 @@ void main() {
     poller.start();
     await tester.pump(const Duration(seconds: 3));
     expect(requests, [LvbuReadCommand.voltage]);
-    completions.first.complete(const LvbuReadReply(command: LvbuReadCommand.voltage, status: 1, value: 38.5));
+    completions.first.complete(const LvbuReadReply(
+        command: LvbuReadCommand.voltage, status: 1, value: 38.5));
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
     expect(requests, [LvbuReadCommand.voltage, LvbuReadCommand.speed]);
     poller.stop();
-    completions.last.complete(const LvbuReadReply(command: LvbuReadCommand.speed, status: 1, value: 2));
+    completions.last.complete(const LvbuReadReply(
+        command: LvbuReadCommand.speed, status: 1, value: 2));
     await tester.pump();
     expect(replies.length, 1);
     await tester.pump(const Duration(seconds: 3));

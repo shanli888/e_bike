@@ -1,10 +1,15 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import '../services/ble_service.dart';
+import '../services/br80_protocol.dart';
+import '../services/br80_service.dart';
 import '../services/system_settings.dart';
 import '../widgets/app_dialogs.dart';
+import '../widgets/remote_glyph.dart';
 
 /// 设备扫描/连接页面
 class DeviceScreen extends StatefulWidget {
@@ -17,38 +22,126 @@ class DeviceScreen extends StatefulWidget {
 class _DeviceScreenState extends State<DeviceScreen> {
   BleService? _ble;
 
+  /// 闪控专用扫描：与码表扫描共用蓝牙扫描，但独立发起、独立连接
+  bool _remoteScanPending = false;
+  Timer? _remoteScanTimer;
+  static const Duration _remoteScanWindow = Duration(seconds: 15);
+
   @override
   void initState() {
     super.initState();
     _ble = context.read<BleService>();
+    _ble?.addListener(_onBleChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _startScan();
+      unawaited(_startScan());
     });
   }
 
   @override
   void dispose() {
+    _ble?.removeListener(_onBleChanged);
+    _remoteScanTimer?.cancel();
     // 自动扫描独立于页面生命周期，切换页面时继续进行。
     super.dispose();
   }
 
-  /// 开始扫描：蓝牙没开会弹窗引导去开启
-  Future<void> _startScan() async {
+  /// 扫描期间只挑名字命中的 BR80 闪控（列表已按信号强度降序）
+  List<ScanResult> _remoteCandidates(BleService ble) {
+    final hits = ble.devices
+        .where((r) => Br80Protocol.matchesScan(
+              name: r.device.platformName,
+              advertisedUuids: r.advertisementData.serviceUuids,
+            ))
+        .toList();
+    // 头盔也会广播 A2A0：名称命中的闪控优先，其次按信号强度
+    hits.sort((a, b) {
+      final an = Br80Protocol.matchesName(a.device.platformName) ? 0 : 1;
+      final bn = Br80Protocol.matchesName(b.device.platformName) ? 0 : 1;
+      return an != bn ? an.compareTo(bn) : b.rssi.compareTo(a.rssi);
+    });
+    return hits;
+  }
+
+  /// 闪控专用「扫描并连接」：发现第一个候选就立即连，不占用码表连接
+  Future<void> _startRemoteScan() async {
+    final ble = _ble;
+    if (ble == null || _remoteScanPending) return;
+    final remote = context.read<Br80Service>();
+    if (remote.isConnected || remote.isConnecting) return;
+
+    setState(() => _remoteScanPending = true);
+    final started = await _startScan();
+    if (!mounted) return;
+    if (!started) {
+      _finishRemoteScan();
+      return;
+    }
+
+    // 复用已有扫描结果：若刚才那一轮已经看到闪控，立即连接
+    final existing = _remoteCandidates(ble);
+    if (existing.isNotEmpty) {
+      _finishRemoteScan();
+      await _connectRemote(remote, existing.first.device);
+      return;
+    }
+
+    _onBleChanged();
+    if (!_remoteScanPending) return;
+    _remoteScanTimer = Timer(_remoteScanWindow, () {
+      if (!mounted || !_remoteScanPending) return;
+      _finishRemoteScan();
+      unawaited(_showRemoteNotFoundDialog());
+    });
+  }
+
+  void _onBleChanged() {
+    if (!_remoteScanPending || !mounted) return;
     final ble = _ble;
     if (ble == null) return;
+    final candidates = _remoteCandidates(ble);
+    if (candidates.isEmpty) return;
+    _finishRemoteScan();
+    final remote = context.read<Br80Service>();
+    if (remote.isConnected || remote.isConnecting) return;
+    unawaited(_connectRemote(remote, candidates.first.device));
+  }
+
+  void _finishRemoteScan() {
+    _remoteScanTimer?.cancel();
+    _remoteScanTimer = null;
+    if (!mounted) return;
+    setState(() => _remoteScanPending = false);
+  }
+
+  Future<void> _showRemoteNotFoundDialog() async {
+    await showAppDialog(
+      context,
+      title: '未找到闪控',
+      message: '请按闪控任意键唤醒，靠近手机后重试；\n确认它没有被其他手机或头盔占用。',
+      icon: Icons.gamepad,
+      color: Colors.orange,
+      primaryLabel: '重新扫描',
+      onPrimary: _startRemoteScan,
+    );
+  }
+
+  /// 开始扫描：蓝牙没开会弹窗引导去开启
+  Future<bool> _startScan() async {
+    final ble = _ble;
+    if (ble == null) return false;
 
     // 启动瞬间缓存的适配器状态可能是 unknown，这里读系统实时状态
     var state = await ble.readAdapterState();
     if (state == BluetoothAdapterState.off) {
-      if (!mounted) return;
+      if (!mounted) return false;
       await _showBluetoothOffDialog();
-      if (!mounted) return;
+      if (!mounted) return false;
       state = await ble.readAdapterState();
-      if (state == BluetoothAdapterState.off) return;
+      if (state == BluetoothAdapterState.off) return false;
     }
 
     final started = await ble.startScan();
-    if (!mounted || started) return;
+    if (started || !mounted) return started;
 
     await showAppDialog(
       context,
@@ -61,6 +154,7 @@ class _DeviceScreenState extends State<DeviceScreen> {
         await openAppSettings();
       },
     );
+    return false;
   }
 
   /// 蓝牙未开启弹窗
@@ -108,14 +202,16 @@ class _DeviceScreenState extends State<DeviceScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<BleService>(
-      builder: (context, ble, _) {
+    return Consumer2<BleService, Br80Service>(
+      builder: (context, ble, remote, _) {
         final bluetoothOff = ble.adapterState == BluetoothAdapterState.off;
 
         return Container(
           color: const Color(0xFF1A1A2E),
           child: Column(
             children: [
+              // 闪控独立连接入口（常驻，便于调试）
+              _buildRemoteCard(remote),
               // 已连接设备信息
               if (ble.isConnected) _buildConnectedDevice(ble),
               if (!ble.isConnected && ble.lastDevice != null)
@@ -163,6 +259,95 @@ class _DeviceScreenState extends State<DeviceScreen> {
             onPressed: _enableBluetooth,
             style: TextButton.styleFrom(foregroundColor: Colors.orange),
             child: const Text('开启蓝牙'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 闪控（BR80）独立连接卡片：单独扫描/连接/断开，并显示最新按键反馈
+  Widget _buildRemoteCard(Br80Service remote) {
+    final connected = remote.isConnected;
+    final busy = remote.isConnecting || _remoteScanPending;
+    final accent = connected ? Colors.green : Colors.orange;
+    final name = remote.device?.platformName ?? '';
+    final String status;
+    if (connected) {
+      status = '已连接 · ${name.isEmpty ? 'BR80' : name}'
+          ' · 电量 ${remote.battery == null ? '--' : '${remote.battery}%'}';
+    } else if (remote.isConnecting) {
+      status = '正在连接闪控…';
+    } else if (_remoteScanPending) {
+      status = '正在扫描闪控…请按任意键唤醒';
+    } else {
+      status = '未连接 · 可与码表同时连接';
+    }
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [accent.withValues(alpha: 0.18), accent.withValues(alpha: 0.05)],
+        ),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: accent.withValues(alpha: 0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              // 与设计稿一致的双态闪控图标（连接绿 / 未连接灰）。
+              RemoteGlyph(connected: connected, size: 26),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Text('闪控（BR80）',
+                    style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600)),
+              ),
+              if (busy)
+                const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(status, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+          const SizedBox(height: 8),
+          if (!connected && remote.lastError != null) ...[
+            const SizedBox(height: 4),
+            Text('上次失败：${remote.lastError}',
+                style: const TextStyle(color: Colors.redAccent, fontSize: 12)),
+          ],
+          const SizedBox(height: 6),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              if (connected)
+                TextButton(
+                  onPressed: remote.disconnect,
+                  style: TextButton.styleFrom(foregroundColor: Colors.red),
+                  child: const Text('断开闪控'),
+                )
+              else
+                ElevatedButton.icon(
+                  onPressed: busy ? null : _startRemoteScan,
+                  icon: const Icon(Icons.bluetooth_searching, size: 16),
+                  label: const Text('扫描并连接'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.orange,
+                    foregroundColor: Colors.black87,
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                  ),
+                ),
+            ],
           ),
         ],
       ),
@@ -293,7 +478,7 @@ class _DeviceScreenState extends State<DeviceScreen> {
                 size: 64, color: Colors.white.withValues(alpha: 0.2)),
             const SizedBox(height: 16),
             Text(
-              searching ? '正在搜索附近的码表…' : '未发现设备',
+              searching ? '正在搜索附近的码表和闪控…' : '未发现设备',
               style: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 15),
             ),
             const SizedBox(height: 8),
@@ -324,7 +509,7 @@ class _DeviceScreenState extends State<DeviceScreen> {
         for (final result in ble.devices)
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
-            child: _buildDeviceTile(ble, result.device, result.rssi),
+            child: _buildDeviceTile(ble, result),
           ),
       ],
     );
@@ -337,7 +522,7 @@ class _DeviceScreenState extends State<DeviceScreen> {
       child: Row(
         children: [
           Text(
-            ble.showAllDevices ? '全部蓝牙设备' : '仅显示码表设备',
+            ble.showAllDevices ? '全部蓝牙设备' : '仅显示码表和闪控',
             style: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 12),
           ),
           const Spacer(),
@@ -352,8 +537,17 @@ class _DeviceScreenState extends State<DeviceScreen> {
     );
   }
 
-  Widget _buildDeviceTile(BleService ble, BluetoothDevice device, int rssi) {
-    final isThisDevice = ble.connectedDevice?.remoteId == device.remoteId;
+  Widget _buildDeviceTile(BleService ble, ScanResult result) {
+    final device = result.device;
+    final rssi = result.rssi;
+    final remote = context.read<Br80Service>();
+    final isRemote = Br80Protocol.matchesScan(
+      name: device.platformName,
+      advertisedUuids: result.advertisementData.serviceUuids,
+    );
+    final isThisDevice = isRemote
+        ? remote.device?.remoteId == device.remoteId && remote.isConnected
+        : ble.connectedDevice?.remoteId == device.remoteId;
 
     return Container(
       decoration: BoxDecoration(
@@ -383,7 +577,7 @@ class _DeviceScreenState extends State<DeviceScreen> {
           ),
         ),
         title: Text(
-          device.platformName,
+          device.platformName.isEmpty ? '闪控 (BR80)' : device.platformName,
           style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w500),
         ),
         subtitle: Row(
@@ -396,7 +590,7 @@ class _DeviceScreenState extends State<DeviceScreen> {
             ),
           ],
         ),
-        trailing: ble.isConnecting
+        trailing: (isRemote ? remote.isConnecting : ble.isConnecting)
             ? const SizedBox(
                 width: 24,
                 height: 24,
@@ -405,7 +599,9 @@ class _DeviceScreenState extends State<DeviceScreen> {
             : isThisDevice
                 ? const Icon(Icons.check_circle, color: Colors.green, size: 24)
                 : ElevatedButton(
-                    onPressed: () => _connect(ble, device),
+                    onPressed: () => isRemote
+                        ? _connectRemote(remote, device)
+                        : _connect(ble, device),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.orange,
                       foregroundColor: Colors.white,
@@ -415,6 +611,26 @@ class _DeviceScreenState extends State<DeviceScreen> {
                     child: const Text('连接', style: TextStyle(fontSize: 13)),
                   ),
       ),
+    );
+  }
+
+  Future<void> _connectRemote(Br80Service remote, BluetoothDevice device) async {
+    if (remote.isConnected) {
+      await showAppDialog(context, title: '闪控已连接', message: '请先断开当前闪控。');
+      return;
+    }
+    final ok = await remote.connect(device);
+    if (!mounted || ok) return;
+    final reason = remote.lastError;
+    await showAppDialog(
+      context,
+      title: '闪控连接失败',
+      message: '${reason == null ? '' : '原因：$reason\n\n'}'
+          '请按闪控任意键唤醒，确认它未被其他设备占用后重试。',
+      icon: Icons.bluetooth_disabled,
+      color: Colors.red,
+      primaryLabel: '重试',
+      onPrimary: () => _connectRemote(remote, device),
     );
   }
 

@@ -7,6 +7,9 @@ enum CommandResult {
   /// 已下发且收到设备确认
   ok,
 
+  /// 助力已在 0% / 99% 边界，本次没有发送
+  atLimit,
+
   /// 已下发，但在超时时间内没有收到设备回包
   noResponse,
 
@@ -51,6 +54,7 @@ extension CommandResultX on CommandResult {
 
   String get title => switch (this) {
         CommandResult.ok => '指令已确认',
+        CommandResult.atLimit => '已到边界',
         CommandResult.noResponse => '未收到设备确认',
         CommandResult.deviceError => '设备执行失败',
         CommandResult.writeFailed => '写入失败',
@@ -63,10 +67,11 @@ extension CommandResultX on CommandResult {
 
   String get message => switch (this) {
         CommandResult.ok => '设备已回包确认。',
+        CommandResult.atLimit => '助力已在 0% 或 99% 边界，本次未发送。',
         CommandResult.noResponse => '未收到匹配确认，设备可能已经执行；请勿连续重试，先在原厂 App 或车辆上核实。',
         CommandResult.deviceError => '设备返回了失败状态，请检查参数或设备状态。',
         CommandResult.writeFailed => '蓝牙写入未成功或无法确认；请检查连接并通过原厂 App 或车辆核实。',
-        CommandResult.busy => '蓝牙操作正在进行或模式设置处于 5 秒冷却期；本次未发送，请稍后再试。',
+        CommandResult.busy => '蓝牙操作正在进行（只读查询或模式设置冷却），本次未发送；停止助力会自动等待链路空闲后重发。',
         CommandResult.modeUncertain => '手动模式尚未确认或上次设置结果不确定，本次未发送。请先在车辆或原厂 App 核实；如有必要重启本应用。',
         CommandResult.notStationary => '电机速度不为零、未读取或已过期，本次未发送。请停车并确认车轮安全后重试。',
         CommandResult.notConnected => '请先在「设备」页搜索并连接控制器。',

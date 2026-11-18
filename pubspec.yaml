@@ -1,7 +1,7 @@
 name: bike_computer
 description: LVBU/WePower 电动助力控制器 - 离线蓝牙版（骑行数据 + 助力控制）
 publish_to: 'none'
-version: 1.6.29+39
+version: 1.6.57+68
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -25,3 +25,16 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  fonts:
+    # DSEG7（keshikan，SIL OFL 1.1，可商用），从设计原型内嵌的 woff2 转为 TTF。
+    # 详见 assets/fonts/SOURCE.txt
+    - family: DSEG7Classic
+      fonts:
+        - asset: assets/fonts/SEGClassic.ttf
+    - family: DSEG7ClassicThin
+      fonts:
+        - asset: assets/fonts/SEGClassicThin.ttf
+    - family: DSEG7Mini
+      fonts:
+        - asset: assets/fonts/SEGMini.ttf

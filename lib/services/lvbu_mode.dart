@@ -19,6 +19,9 @@ class LvbuModeReply {
 }
 
 /// 匹配设备标识及完整 C4 回复；确认码 01 后仍须核对实际返回模式。
+///
+/// 只有 01（成功）与 02（设备明确失败）算有效回复；
+/// 其它状态码（例如写入被回显的半截帧）会被跳过，继续找真正的回复。
 class LvbuModeReplyParser {
   LvbuModeReplyParser(String imei) : _prefix = 'C4F$imei' {
     if (!LvbuProtocol.validImei(imei)) throw ArgumentError('无效的电机 IMEI');
@@ -37,13 +40,25 @@ class LvbuModeReplyParser {
       if (index > 0) _buffer = _buffer.substring(index);
       if (_buffer.length < 22) return null;
       final frame = _buffer.substring(0, 22);
-      _buffer = _buffer.substring(22);
-      final status = int.parse(frame.substring(18, 20), radix: 16);
-      if (status != 1) return LvbuModeReply(status: status);
-      final code = int.tryParse(frame.substring(20, 22));
-      if (code == null) continue;
-      final mode = AssistMode.tryFromCode(code);
-      if (mode != null) return LvbuModeReply(status: status, mode: mode);
+      final parsedStatus = int.tryParse(frame.substring(18, 20), radix: 16);
+      final status = parsedStatus ?? 0;
+      if (status == 1) {
+        final code = int.tryParse(frame.substring(20, 22));
+        final mode = code == null ? null : AssistMode.tryFromCode(code);
+        if (mode == null) {
+          // 未知模式码：跳过这一帧继续找真正的回复。
+          _buffer = _buffer.substring(1);
+          continue;
+        }
+        _buffer = _buffer.substring(22);
+        return LvbuModeReply(status: status, mode: mode);
+      }
+      if (status == 2) {
+        _buffer = _buffer.substring(22);
+        return LvbuModeReply(status: status);
+      }
+      // 无效帧：跳过一个字符继续搜索，避免把回显帧当成失败回复。
+      _buffer = _buffer.substring(1);
     }
   }
 }
@@ -67,6 +82,10 @@ class LvbuAssistPercentReply {
 }
 
 /// A5 回复格式与 C4 一样为 22 个十六进制字符，末尾是十进制百分比。
+///
+/// 只有 01（成功）与 02（设备明确失败）算有效回复；
+/// 其它状态码（例如写入被回显的半截帧）会被跳过，继续找真正的回复，
+/// 避免把「回显帧」误判成设备拒绝。
 class LvbuAssistPercentReplyParser {
   LvbuAssistPercentReplyParser(String imei) : _prefix = 'A5F$imei' {
     if (!LvbuProtocol.validImei(imei)) throw ArgumentError('无效的电机 IMEI');
@@ -85,12 +104,24 @@ class LvbuAssistPercentReplyParser {
       if (index > 0) _buffer = _buffer.substring(index);
       if (_buffer.length < 22) return null;
       final frame = _buffer.substring(0, 22);
-      _buffer = _buffer.substring(22);
-      final status = int.parse(frame.substring(18, 20), radix: 16);
-      if (status != 1) return LvbuAssistPercentReply(status: status);
-      final digits = frame.substring(20, 22);
-      if (!RegExp(r'^\d{2}$').hasMatch(digits)) continue;
-      return LvbuAssistPercentReply(status: status, percent: int.parse(digits));
+      final parsedStatus = int.tryParse(frame.substring(18, 20), radix: 16);
+      final status = parsedStatus ?? 0;
+      if (status == 1) {
+        final digits = frame.substring(20, 22);
+        if (!RegExp(r'^\d{2}$').hasMatch(digits)) {
+          // 非十进制数值：跳过这一帧继续找（例如写入回显帧）。
+          _buffer = _buffer.substring(1);
+          continue;
+        }
+        _buffer = _buffer.substring(22);
+        return LvbuAssistPercentReply(status: status, percent: int.parse(digits));
+      }
+      if (status == 2) {
+        _buffer = _buffer.substring(22);
+        return LvbuAssistPercentReply(status: status);
+      }
+      // 无效帧：跳过一个字符继续搜索，避免把回显帧当成失败回复。
+      _buffer = _buffer.substring(1);
     }
   }
 }

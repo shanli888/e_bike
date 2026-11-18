@@ -1,31 +1,61 @@
 import 'package:bike_computer/models/assist_mode.dart';
 import 'package:bike_computer/models/bike_data.dart';
 import 'package:bike_computer/models/command_result.dart';
+import 'package:bike_computer/models/demo_ride_data.dart';
 import 'package:bike_computer/screens/dashboard_screen.dart';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:bike_computer/services/assist_remote_scheduler.dart';
+import 'package:bike_computer/services/assist_step_settings.dart';
 import 'package:bike_computer/services/ble_service.dart';
+import 'package:bike_computer/services/br80_service.dart';
+import 'package:bike_computer/services/demo_mode_settings.dart';
 import 'package:bike_computer/services/gps_service.dart';
+import 'package:bike_computer/services/ride_time_service.dart';
+import 'package:bike_computer/theme/dashboard_theme.dart';
+import 'package:bike_computer/theme/sensor_status.dart';
+import 'package:bike_computer/widgets/segment_display.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
+/// 只替换与助力指令相关的 getter，其余仍用真实 BleService 的只读数据。
 class _ConnectedBleService extends ChangeNotifier implements BleService {
   _ConnectedBleService(this.delegate);
   final BleService delegate;
   final List<AssistMode> requestedModes = [];
   final List<int> requestedPercents = [];
+  final List<int> requestedSteps = [];
+  int stopCalls = 0;
   bool manual = false;
   bool percentConfirmed = false;
+  int _percent = 51;
 
   @override
-  Future<CommandResult> setAssistPercent(int percent) async {
+  Future<CommandResult> setAssistPercent(int percent,
+      {bool priority = false}) async {
     requestedPercents.add(percent);
+    _percent = percent;
     return CommandResult.ok;
   }
 
   @override
-  Future<CommandResult> setAssistMode(AssistMode mode) async {
+  Future<CommandResult> stepAssistPercent(int delta) async {
+    requestedSteps.add(delta);
+    return setAssistPercent((_percent + delta).clamp(0, 99));
+  }
+
+  @override
+  Future<CommandResult> setAssistMode(AssistMode mode,
+      {bool priority = false}) async {
     requestedModes.add(mode);
+    return CommandResult.ok;
+  }
+
+  @override
+  Future<CommandResult> stopAssist() async {
+    stopCalls++;
+    _percent = 0;
     return CommandResult.ok;
   }
 
@@ -51,7 +81,7 @@ class _ConnectedBleService extends ChangeNotifier implements BleService {
   String get assistModeStatus => delegate.assistModeStatus;
 
   @override
-  int get assistPercent => delegate.assistPercent;
+  int get assistPercent => _percent;
 
   @override
   bool get assistPercentConfirmed => percentConfirmed;
@@ -60,8 +90,119 @@ class _ConnectedBleService extends ChangeNotifier implements BleService {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
+/// 测试用 GPS 服务：可直接控制「副速度对比」开关，避免触发真实定位。
+class _TestGpsService extends GpsService {
+  bool _compare = false;
+  SpeedSource _source = SpeedSource.bluetooth;
+  double? _speed;
+
+  @override
+  bool get comparisonEnabled => _compare;
+  @override
+  SpeedSource get source => _source;
+  @override
+  double? get speedKmh => _speed;
+
+  void setCompare(bool value) {
+    _compare = value;
+    notifyListeners();
+  }
+
+  /// 首页点副速度切换来源时走这里，测试里不触发真实定位插件。
+  @override
+  Future<bool> setSource(SpeedSource source) async {
+    if (_source == source) return true;
+    _source = source;
+    notifyListeners();
+    return true;
+  }
+
+  /// 模拟 GPS 作为主速度来源
+  void useGpsPrimary(double speed) {
+    _source = SpeedSource.gps;
+    _speed = speed;
+    notifyListeners();
+  }
+}
+
+/// 测试用闪控服务：只控制连接状态，不触碰真实 BLE。
+class _FakeRemote extends ChangeNotifier implements Br80Service {
+  _FakeRemote({required this.connected});
+
+  bool connected;
+
+  @override
+  bool get isConnected => connected;
+
+  @override
+  String? get message => null;
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+/// 统一提供首页所需的 Provider（独立计时服务、闪控、助力步进设置）。
+Widget _wrap(
+  Widget child,
+  BleService ble,
+  GpsService gps, {
+  AssistStepSettings? steps,
+  Br80Service? remote,
+  DemoModeSettings? demo,
+  AssistRemoteScheduler? scheduler,
+}) {
+  return MultiProvider(
+    providers: [
+      ChangeNotifierProvider<BleService>.value(value: ble),
+      ChangeNotifierProvider<GpsService>.value(value: gps),
+      ChangeNotifierProvider<Br80Service>.value(
+          value: remote ?? Br80Service(onAssistStep: (direction) async {})),
+      if (scheduler != null)
+        ChangeNotifierProvider<AssistRemoteScheduler>.value(value: scheduler)
+      else
+        ChangeNotifierProvider<AssistRemoteScheduler>(
+          create: (_) => AssistRemoteScheduler(
+            ble: ble,
+            stepOf: () => steps?.step ?? AssistStepSettings.defaultStep,
+            onResult: (_) {},
+          ),
+        ),
+      ChangeNotifierProvider<RideTimeService>(
+          create: (_) => RideTimeService.fromServices(ble, gps)),
+      ChangeNotifierProvider<AssistStepSettings>(
+          create: (_) => steps ?? AssistStepSettings()),
+      ChangeNotifierProvider<DemoModeSettings>(
+          create: (_) => demo ?? DemoModeSettings()),
+    ],
+    child: child,
+  );
+}
+
+Widget _screen({VoidCallback? onOpenDevices, DateTime Function()? demoClock}) =>
+    MaterialApp(
+      home: Scaffold(
+          body: DashboardScreen(
+              onOpenDevices: onOpenDevices, demoClock: demoClock)),
+    );
+
+SegmentNumber _segment(WidgetTester tester, String key) =>
+    tester.widget<SegmentNumber>(find.byKey(ValueKey(key)));
+
+Finder _key(String key) => find.byKey(ValueKey(key));
+
+Color _textColor(WidgetTester tester, String key) =>
+    tester.widget<Text>(_key(key)).style!.color!;
+
+Color _cardBorderColor(WidgetTester tester, String key) {
+  final decoration =
+      tester.widget<Container>(_key(key)).decoration! as BoxDecoration;
+  return (decoration.border as Border).top.color;
+}
+
 void main() {
-  testWidgets('控制按钮禁用，设备未报告的数据保持未知', (tester) async {
+  setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  testWidgets('新视觉分区齐全：七段主速度、三列副表、助力卡与传感器卡', (tester) async {
     final ble = BleService();
     ble.bikeData.clearReadOnlyAvailability();
     ble.bikeData.speed = 12.3;
@@ -69,122 +210,931 @@ void main() {
     ble.bikeData.voltage = 38.5;
     ble.bikeData.batteryLevel = 77;
     ble.bikeData.batteryLevelAvailable = true;
-    ble.bikeData.batteryLevelEstimated = true;
-    ble.bikeData.controllerTemperature = 0;
+    ble.bikeData.controllerTemperature = 26.5;
     ble.bikeData.temperatureAvailable = true;
     ble.bikeData.slope = -1.2;
     ble.bikeData.gyroAngleAvailable = true;
-    ble.bikeData.climbingAngle = 1.2;
-    ble.bikeData.climbingLevel = 25;
     ble.bikeData.tripDistance = 1.5;
     ble.bikeData.tripAvailable = true;
+    ble.bikeData.avgSpeed = 8.4;
     final connected = _ConnectedBleService(ble);
-    await tester.pumpWidget(MultiProvider(
-      providers: [
-        ChangeNotifierProvider<BleService>.value(value: connected),
-        ChangeNotifierProvider<GpsService>(create: (_) => GpsService()),
-      ],
-      child: const MaterialApp(home: Scaffold(body: DashboardScreen())),
-    ));
-    expect(find.text('12.3'), findsOneWidget);
-    final voltage = tester.widget<Text>(find.text('38.5 V'));
-    final percent = tester.widget<Text>(find.text('77% · 估算'));
-    expect(voltage.style!.fontSize, greaterThan(percent.style!.fontSize!));
-    expect(find.text('0.0'), findsOneWidget);
-    expect(find.text('坡度信息'), findsOneWidget);
-    expect(find.text('-1.2°'), findsOneWidget);
-    expect(find.text('蓝牙车体倾角'), findsOneWidget);
-    expect(find.text('爬坡设定'), findsNothing);
-    expect(find.text('助力 25%'), findsNothing);
-    expect(find.text('陀螺仪'), findsNothing);
-    expect(find.text('助力设置仅限停车测试；请使用车辆原有控制装置'), findsNothing);
-    expect(find.text('助力功率'), findsNothing);
-    expect(find.text('电机功率'), findsNothing);
+    await tester.pumpWidget(_wrap(_screen(), connected, GpsService()));
+
+    // 主速度用七段控件绘制，不再有可 find.text 的纯文本数字。
+    expect(_segment(tester, 'primary-speed').text, '12.3');
+    expect(_segment(tester, 'primary-speed').integerDigits, 2);
+    expect(_segment(tester, 'primary-speed').fractionDigits, 1);
+    expect(_key('primary-icon-bluetooth'), findsOneWidget);
+
+    // 三列副表 AVG / MAX / km，里程的 km 语义仍在。
+    for (final tag in ['AVG', 'MAX', 'km']) {
+      expect(_key('sub-tag-$tag'), findsOneWidget);
+      expect(_key('sub-value-$tag'), findsOneWidget);
+    }
+    expect(_segment(tester, 'sub-value-AVG').text, '8.4');
+    expect(_segment(tester, 'sub-value-MAX').text, '0.0');
+    expect(_segment(tester, 'sub-value-km').text, '1.5');
+    expect(_segment(tester, 'sub-value-km').semanticsLabel, '1.5 km');
+    expect(find.textContaining('km/h'), findsNothing);
+
+    // 助力卡与三张传感器卡按新稿命名。
+    expect(find.text('助力控制'), findsOneWidget);
+    expect(find.text('电量'), findsOneWidget);
+    expect(find.text('温度'), findsOneWidget);
+    expect(find.text('陀螺仪'), findsOneWidget);
+    expect(find.text('77%'), findsOneWidget);
+    expect(find.text('38.5'), findsOneWidget);
+    expect(find.text('V'), findsOneWidget);
+    expect(find.text('26.5'), findsOneWidget);
+    expect(find.text('-1.2'), findsOneWidget);
+
+    // 电量 77% 属 50~80 蓝色档，温度 26.5℃ 属 <30 绿色档；
+    // 百分比、进度条填充、电压与卡片描边统一跟随档位色。
+    expect(_textColor(tester, 'battery-percent'), DashColors.blue);
+    expect(_textColor(tester, 'battery-voltage'), DashColors.blue);
+    expect(_cardBorderColor(tester, 'battery-card'),
+        DashColors.blue.withValues(alpha: 0.42));
+    expect(_textColor(tester, 'temperature-value'), DashColors.green);
+    expect(find.text('正常'), findsOneWidget);
+    expect(_key('battery-bar'), findsOneWidget);
+    expect(
+      tester
+          .widget<FractionallySizedBox>(find.descendant(
+            of: _key('battery-bar'),
+            matching: find.byType(FractionallySizedBox),
+          ))
+          .widthFactor,
+      0.77,
+    );
+    // 进度条必须是一条连续填充：底轨只有一块、填充不透明，
+    // 不能再出现分区淡底 / 常亮四色带把进度条切成几段。
+    expect(_key('battery-track'), findsOneWidget);
+    expect(_key('battery-fill'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: _key('battery-bar'),
+        matching: find.byType(ColoredBox),
+      ),
+      findsOneWidget,
+    );
+    final fillDecoration = tester
+        .widget<DecoratedBox>(_key('battery-fill'))
+        .decoration as BoxDecoration;
+    final fillColors = (fillDecoration.gradient! as LinearGradient).colors;
+    for (final color in fillColors) {
+      expect(color.a, 1.0, reason: '填充色不透明，底轨分区线不会透出来');
+    }
+    // 填充宽度与百分比一致，是完整的一块而非分段拼凑。
+    final barWidth = tester.getSize(_key('battery-bar')).width;
+    expect(tester.getSize(_key('battery-fill')).width / barWidth,
+        closeTo(0.77, 0.02));
+
+    // 旧版文案与部件已移除。
+    expect(find.text('手动（默认）'), findsNothing);
+    expect(find.text('坡度信息'), findsNothing);
     expect(find.text('总里程'), findsNothing);
-    expect(find.text('模式未知（无离线查询）'), findsOneWidget);
     expect(find.text('停止'), findsNothing);
-    await tester.tap(find.text('通勤'));
-    await tester.pumpAndSettle();
-    expect(connected.requestedModes, [AssistMode.commute]);
-    expect(find.text('确认切换助力模式'), findsNothing);
-    expect(find.text('未确认车辆静止'), findsNothing);
-    expect(find.text('模式未知（无离线查询）'), findsOneWidget);
+
+    // 骑行时间保留，但去掉「骑行时间」文字，只留 icon + HH:MM 数码管。
+    expect(find.text('骑行时间'), findsNothing);
+    expect(_key('ride-time'), findsNothing);
+
     await tester.pumpWidget(const SizedBox.shrink());
     connected.dispose();
     ble.bikeData.clearReadOnlyAvailability();
   });
 
+  testWidgets('电量四档与温度三档在首页同步切换配色', (tester) async {
+    final cases = [
+      (
+        battery: 95,
+        temp: 25.0,
+        batteryColor: DashColors.green,
+        tempColor: DashColors.green,
+        label: '正常'
+      ),
+      (
+        battery: 81,
+        temp: 30.0,
+        batteryColor: DashColors.green,
+        tempColor: DashColors.yellow,
+        label: '偏热'
+      ),
+      (
+        battery: 80,
+        temp: 50.0,
+        batteryColor: DashColors.blue,
+        tempColor: DashColors.yellow,
+        label: '偏热'
+      ),
+      (
+        battery: 50,
+        temp: 50.1,
+        batteryColor: DashColors.blue,
+        tempColor: DashColors.red,
+        label: '过热'
+      ),
+      (
+        battery: 49,
+        temp: 18.0,
+        batteryColor: DashColors.orange,
+        tempColor: DashColors.green,
+        label: '正常'
+      ),
+      (
+        battery: 20,
+        temp: 62.0,
+        batteryColor: DashColors.orange,
+        tempColor: DashColors.red,
+        label: '过热'
+      ),
+      (
+        battery: 19,
+        temp: 0.0,
+        batteryColor: DashColors.red,
+        tempColor: DashColors.green,
+        label: '正常'
+      ),
+      (
+        battery: 0,
+        temp: 55.0,
+        batteryColor: DashColors.red,
+        tempColor: DashColors.red,
+        label: '过热'
+      ),
+    ];
+
+    for (final c in cases) {
+      final ble = BleService();
+      ble.bikeData.clearReadOnlyAvailability();
+      ble.bikeData.voltage = 40.0;
+      ble.bikeData.batteryLevel = c.battery;
+      ble.bikeData.batteryLevelAvailable = true;
+      ble.bikeData.controllerTemperature = c.temp;
+      ble.bikeData.temperatureAvailable = true;
+      final connected = _ConnectedBleService(ble);
+      await tester.pumpWidget(_wrap(_screen(), connected, GpsService()));
+
+      expect(tester.widget<Text>(_key('battery-percent')).data, '${c.battery}%',
+          reason: '电量 ${c.battery}%');
+      expect(_textColor(tester, 'battery-percent'), c.batteryColor,
+          reason: '电量 ${c.battery}% 的百分比配色');
+      expect(_textColor(tester, 'battery-voltage'), c.batteryColor,
+          reason: '电量 ${c.battery}% 的电压配色');
+      expect(_cardBorderColor(tester, 'battery-card'),
+          c.batteryColor.withValues(alpha: 0.42),
+          reason: '电量 ${c.battery}% 的卡片描边');
+      expect(
+        tester
+            .widget<FractionallySizedBox>(find.descendant(
+              of: _key('battery-bar'),
+              matching: find.byType(FractionallySizedBox),
+            ))
+            .widthFactor,
+        c.battery / 100,
+        reason: '电量 ${c.battery}% 的进度条填充',
+      );
+      final fillColors = ((tester
+                  .widget<DecoratedBox>(_key('battery-fill'))
+                  .decoration as BoxDecoration)
+              .gradient! as LinearGradient)
+          .colors;
+      expect(fillColors.last, c.batteryColor,
+          reason: '电量 ${c.battery}% 的进度条填充配色');
+
+      expect(_textColor(tester, 'temperature-value'), c.tempColor,
+          reason: '温度 ${c.temp}℃ 的配色');
+      expect(_cardBorderColor(tester, 'temperature-card'),
+          c.tempColor.withValues(alpha: 0.34),
+          reason: '温度 ${c.temp}℃ 的卡片描边');
+      expect(find.text(c.label), findsOneWidget, reason: '温度 ${c.temp}℃ 的档位标签');
+      expect(tester.takeException(), isNull);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      connected.dispose();
+    }
+  });
+
+  testWidgets('电量/温度无数据时用中性色且进度条不填充', (tester) async {
+    final ble = BleService();
+    ble.bikeData.clearReadOnlyAvailability();
+    final connected = _ConnectedBleService(ble);
+    await tester.pumpWidget(_wrap(_screen(), connected, GpsService()));
+
+    expect(tester.widget<Text>(_key('battery-percent')).data, '--');
+    expect(_textColor(tester, 'battery-percent'), DashColors.muted2);
+    expect(_textColor(tester, 'battery-voltage'), DashColors.muted2);
+    expect(_textColor(tester, 'temperature-value'), DashColors.muted2);
+    expect(
+      find.descendant(
+        of: _key('battery-bar'),
+        matching: find.byType(FractionallySizedBox),
+      ),
+      findsNothing,
+    );
+    expect(tester.takeException(), isNull);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    connected.dispose();
+  });
+
+  testWidgets('主速度来源图标与小数位拉开间距，仍在数字区域内', (tester) async {
+    final ble = BleService();
+    ble.bikeData.clearReadOnlyAvailability();
+    ble.bikeData.speed = 18.2;
+    ble.bikeData.speedAvailable = true;
+    final connected = _ConnectedBleService(ble);
+    await tester.pumpWidget(_wrap(_screen(), connected, GpsService()));
+
+    final frac = tester.getRect(find.descendant(
+      of: _key('primary-speed'),
+      matching: find.byKey(const ValueKey('segment-on-frac')),
+    ));
+    final icon = tester.getRect(_key('primary-icon-bluetooth'));
+    // 原先 9px 间距（约 8 逻辑像素）太贴字，上移后应明显拉开。
+    expect(frac.top - icon.bottom, greaterThan(11));
+    expect(icon.top, greaterThan(tester.getRect(_key('primary-speed')).top));
+    expect(tester.takeException(), isNull);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    connected.dispose();
+  });
+
+  testWidgets('副速度对比关闭时隐藏副速度，实时速度仍居中显示', (tester) async {
+    final ble = BleService();
+    ble.bikeData.clearReadOnlyAvailability();
+    ble.bikeData.speed = 18.2;
+    ble.bikeData.speedAvailable = true;
+    final connected = _ConnectedBleService(ble);
+    final gps = _TestGpsService();
+    await tester.pumpWidget(_wrap(_screen(), connected, gps));
+
+    expect(gps.comparisonEnabled, isFalse);
+    expect(_key('secondary-speed'), findsNothing);
+    expect(_segment(tester, 'primary-speed').text, '18.2');
+
+    final screenWidth =
+        MediaQuery.sizeOf(tester.element(find.byType(DashboardScreen))).width;
+    final primary = tester.getCenter(_key('primary-speed'));
+    expect((primary.dx - screenWidth / 2).abs(), lessThan(60));
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    connected.dispose();
+    ble.bikeData.clearReadOnlyAvailability();
+  });
+
+  testWidgets('副速度对比开启时在右上角单行显示来源图标，且不与主速度重叠', (tester) async {
+    final ble = BleService();
+    ble.bikeData.clearReadOnlyAvailability();
+    ble.bikeData.speed = 18.2;
+    ble.bikeData.speedAvailable = true;
+    final connected = _ConnectedBleService(ble);
+    final gps = _TestGpsService()..setCompare(true);
+    await tester.pumpWidget(_wrap(_screen(), connected, gps));
+
+    expect(gps.comparisonEnabled, isTrue);
+    expect(_key('secondary-speed'), findsOneWidget);
+    // 蓝牙为主来源时，右上角副速度是 GPS；主速度角标是蓝牙。
+    expect(_key('source-icon-gps'), findsOneWidget);
+    expect(_key('primary-icon-bluetooth'), findsOneWidget);
+    expect(find.text('GPS'), findsNothing);
+    expect(find.text('蓝牙'), findsNothing);
+
+    final iconCenter = tester.getCenter(_key('source-icon-gps'));
+    final valueCenter = tester.getCenter(_key('secondary-speed'));
+    expect((iconCenter.dy - valueCenter.dy).abs(), lessThan(2));
+
+    final screenWidth =
+        MediaQuery.sizeOf(tester.element(find.byType(DashboardScreen))).width;
+    final primaryCenter = tester.getCenter(_key('primary-speed'));
+    expect(iconCenter.dx, greaterThan(screenWidth * 0.7));
+    expect(iconCenter.dy, lessThan(60));
+    expect(iconCenter.dx, greaterThan(primaryCenter.dx + 80));
+    expect((primaryCenter.dx - screenWidth / 2).abs(), lessThan(60));
+    expect(find.textContaining('km/h'), findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    connected.dispose();
+    ble.bikeData.clearReadOnlyAvailability();
+  });
+
+  testWidgets('骑行时间移到顶部状态栏后，首页只保留右上角副速度数码管',
+      (tester) async {
+    final ble = BleService();
+    ble.bikeData.clearReadOnlyAvailability();
+    ble.bikeData.speed = 18.2;
+    ble.bikeData.speedAvailable = true;
+    final connected = _ConnectedBleService(ble);
+    final gps = _TestGpsService()..setCompare(true);
+    await tester.pumpWidget(_wrap(_screen(), connected, gps));
+
+    // 首页不再显示骑行时间（已移到顶部状态栏）。
+    expect(_key('ride-time'), findsNothing);
+    expect(find.text('骑行时间'), findsNothing);
+
+    // 副速度仍是 DSEG7 数码管。
+    final secondary = _segment(tester, 'secondary-speed');
+    expect(secondary.fontFamily, DashFonts.segClassic);
+    expect(secondary.text, isNull, reason: '蓝牙主来源、GPS 未定位时只留熄灭底纹');
+    final secondaryCenter = tester.getCenter(_key('secondary-speed'));
+    expect(secondaryCenter.dx, greaterThan(200), reason: '副速度靠右');
+
+    // 速度来源图标：蓝牙蓝、GPS 绿。
+    expect(tester.widget<Icon>(_key('primary-icon-bluetooth')).color,
+        DashColors.sourceBluetooth);
+    expect(tester.widget<Icon>(_key('source-icon-gps')).color,
+        DashColors.sourceGps);
+    expect(tester.takeException(), isNull);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    connected.dispose();
+    ble.bikeData.clearReadOnlyAvailability();
+  });
+
+  testWidgets('单击右上角副速度区域交替切换蓝牙 / GPS 主速度来源', (tester) async {
+    final ble = BleService();
+    ble.bikeData.clearReadOnlyAvailability();
+    ble.bikeData.speed = 18.2;
+    ble.bikeData.speedAvailable = true;
+    final connected = _ConnectedBleService(ble);
+    final gps = _TestGpsService()..setCompare(true);
+    await tester.pumpWidget(_wrap(_screen(), connected, gps));
+
+    expect(gps.source, SpeedSource.bluetooth);
+    expect(_key('compare-speed-pill'), findsOneWidget);
+
+    await tester.tap(_key('compare-speed-pill'));
+    await tester.pump();
+    expect(gps.source, SpeedSource.gps);
+    expect(_key('primary-icon-gps'), findsOneWidget);
+    expect(_key('source-icon-bluetooth'), findsOneWidget);
+
+    await tester.tap(_key('compare-speed-pill'));
+    await tester.pump();
+    expect(gps.source, SpeedSource.bluetooth);
+    expect(_key('primary-icon-bluetooth'), findsOneWidget);
+    expect(_key('source-icon-gps'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    connected.dispose();
+    ble.bikeData.clearReadOnlyAvailability();
+  });
+
+  testWidgets('手动模式标题后实时显示助力百分比，含闪控本地预览值',
+      (tester) async {
+    final ble = BleService();
+    final connected = _ConnectedBleService(ble)..manual = true;
+    final scheduler = AssistRemoteScheduler(
+      ble: connected,
+      stepOf: () => 5,
+      onResult: (_) {},
+      onToast: (message, {required bool error}) {},
+    );
+    await tester.pumpWidget(
+        _wrap(_screen(), connected, GpsService(), scheduler: scheduler));
+
+    expect(tester.widget<Text>(_key('assist-percent')).data, '51%');
+    scheduler.step(1);
+    await tester.pump();
+    expect(tester.widget<Text>(_key('assist-percent')).data, '56%');
+    expect(tester.takeException(), isNull);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    scheduler.dispose();
+    connected.dispose();
+  });
+
+  testWidgets('GPS 主来源时主速度取 GPS、角标切换为定位图标', (tester) async {
+    final ble = BleService();
+    ble.bikeData.clearReadOnlyAvailability();
+    ble.bikeData.speed = 18.2;
+    ble.bikeData.speedAvailable = true;
+    final connected = _ConnectedBleService(ble);
+    final gps = _TestGpsService()..useGpsPrimary(20);
+    await tester.pumpWidget(_wrap(_screen(), connected, gps));
+
+    expect(_segment(tester, 'primary-speed').text, '20.0');
+    expect(_key('primary-icon-gps'), findsOneWidget);
+    expect(_segment(tester, 'sub-value-km').text, '0.0');
+    expect(find.text('骑行时间'), findsNothing);
+    expect(_key('ride-time'), findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    connected.dispose();
+    ble.bikeData.clearReadOnlyAvailability();
+  });
+
+  testWidgets('无数据时七段只留熄灭底纹，骑行时间为 00:00', (tester) async {
+    final ble = BleService();
+    ble.bikeData.clearReadOnlyAvailability();
+    final connected = _ConnectedBleService(ble);
+    await tester.pumpWidget(_wrap(_screen(), connected, GpsService()));
+
+    expect(_segment(tester, 'primary-speed').text, isNull);
+    expect(_segment(tester, 'sub-value-km').text, isNull);
+    expect(_segment(tester, 'sub-value-km').semanticsLabel, 'km 无数据');
+    expect(_key('ride-time'), findsNothing);
+    expect(find.text('--'), findsWidgets);
+    expect(find.textContaining('km/h'), findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    connected.dispose();
+  });
+
+  testWidgets('骑行时间 HH:MM 且忽略设备上报的行程时长', (tester) async {
+    final ble = BleService();
+    ble.bikeData.clearReadOnlyAvailability();
+    ble.bikeData.speed = 18.2;
+    ble.bikeData.speedAvailable = true;
+    ble.bikeData.tripDistance = 12.3;
+    ble.bikeData.tripAvailable = true;
+    ble.bikeData.rideTime = 5025; // 旧逻辑会显示 01:23:45，现在必须忽略
+    final connected = _ConnectedBleService(ble);
+    await tester.pumpWidget(_wrap(_screen(), connected, GpsService()));
+
+    expect(find.text('骑行时间'), findsNothing);
+    expect(_key('ride-time'), findsNothing);
+    expect(find.text('01:23:45'), findsNothing);
+    expect(_segment(tester, 'sub-value-km').text, '12.3');
+    expect(_segment(tester, 'sub-value-km').semanticsLabel, '12.3 km');
+    expect(find.textContaining('km/h'), findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    connected.dispose();
+    ble.bikeData.clearReadOnlyAvailability();
+  });
+
+  testWidgets('默认手动模式：滑块、加减按钮与模式按钮均可用', (tester) async {
+    final ble = BleService();
+    final connected = _ConnectedBleService(ble);
+    await tester.pumpWidget(_wrap(_screen(), connected, GpsService()));
+
+    expect(_key('mode-manual'), findsOneWidget);
+    expect(find.byType(Slider), findsOneWidget);
+    expect(_key('assist-plus'), findsOneWidget);
+    expect(_key('assist-minus'), findsOneWidget);
+    expect(find.byIcon(Icons.add), findsOneWidget);
+    expect(find.byIcon(Icons.remove), findsOneWidget);
+
+    await tester.tap(_key('mode-commute'));
+    await tester.pumpAndSettle();
+    expect(connected.requestedModes, [AssistMode.commute]);
+    expect(find.text('确认切换助力模式'), findsNothing);
+    expect(find.text('未确认车辆静止'), findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    connected.dispose();
+  });
+
   testWidgets('手动滑块默认位置不发送，松手后发送所选百分比', (tester) async {
     final ble = BleService();
     final connected = _ConnectedBleService(ble)..manual = true;
-    await tester.pumpWidget(MultiProvider(
-      providers: [
-        ChangeNotifierProvider<BleService>.value(value: connected),
-        ChangeNotifierProvider<GpsService>(create: (_) => GpsService()),
-      ],
-      child: const MaterialApp(home: Scaffold(body: DashboardScreen())),
-    ));
-    expect(find.text('百分比未知（默认位置 51%）'), findsOneWidget);
-    final slider = tester.widget<Slider>(find.byType(Slider));
+    await tester.pumpWidget(_wrap(_screen(), connected, GpsService()));
+
+    final slider = tester.widget<Slider>(_key('assist-slider'));
     expect(slider.value, 51);
     expect(slider.max, 99);
     expect(connected.requestedPercents, isEmpty);
     slider.onChanged!(35);
     await tester.pump();
     expect(connected.requestedPercents, isEmpty);
-    tester.widget<Slider>(find.byType(Slider)).onChangeEnd!(35);
+    tester.widget<Slider>(_key('assist-slider')).onChangeEnd!(35);
     await tester.pump();
     expect(connected.requestedPercents, [35]);
+
     await tester.pumpWidget(const SizedBox.shrink());
     connected.dispose();
   });
 
-  testWidgets('副速度显示另一来源，未启用 GPS 时明确提示', (tester) async {
+  testWidgets('手动加减按钮使用设置页步进值，修改后立即生效', (tester) async {
+    SharedPreferences.setMockInitialValues(
+        {AssistStepSettings.preferenceKey: 12});
+    final steps = AssistStepSettings();
+    await steps.load();
+    final ble = BleService();
+    final connected = _ConnectedBleService(ble)..manual = true;
+    await tester
+        .pumpWidget(_wrap(_screen(), connected, GpsService(), steps: steps));
+
+    await tester.tap(_key('assist-plus'));
+    await tester.pump();
+    expect(connected.requestedSteps, [12]);
+
+    await tester.tap(_key('assist-minus'));
+    await tester.pump();
+    expect(connected.requestedSteps, [12, -12]);
+
+    await steps.setStep(3);
+    await tester.pump();
+    await tester.tap(_key('assist-plus'));
+    await tester.pump();
+    expect(connected.requestedSteps, [12, -12, 3]);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    connected.dispose();
+  });
+
+  testWidgets('助力卡不再显示闪控按键调试信息', (tester) async {
+    final ble = BleService();
+    final connected = _ConnectedBleService(ble);
+    final remote = Br80Service(onAssistStep: (direction) async {});
+    await tester
+        .pumpWidget(_wrap(_screen(), connected, GpsService(), remote: remote));
+
+    expect(find.textContaining('闪控按键'), findsNothing);
+    remote.handleKeyFrame(const [0x06]); // ▲ 上键按下
+    await tester.pump();
+    expect(find.textContaining('闪控按键'), findsNothing);
+    expect(find.textContaining('0x06'), findsNothing);
+    expect(tester.takeException(), isNull);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    connected.dispose();
+    remote.dispose();
+  });
+
+  testWidgets('闪控连续调速先移动滑杆，1 秒后只下发一次最终值', (tester) async {
+    final ble = BleService();
+    final connected = _ConnectedBleService(ble)..manual = true;
+    final scheduler = AssistRemoteScheduler(
+      ble: connected,
+      stepOf: () => 5,
+      onResult: (_) {},
+    );
+    await tester.pumpWidget(
+        _wrap(_screen(), connected, GpsService(), scheduler: scheduler));
+    expect(tester.widget<Slider>(_key('assist-slider')).value, 51);
+
+    scheduler.step(1);
+    scheduler.step(1);
+    await tester.pump(const Duration(milliseconds: 600));
+    scheduler.step(1); // 重置 1 秒窗口，三次按键合并为一次
+    await tester.pump();
+    expect(tester.widget<Slider>(_key('assist-slider')).value, 66);
+    expect(connected.requestedPercents, isEmpty, reason: '防抖窗口内不应下发任何指令');
+
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump();
+    expect(connected.requestedPercents, [66]);
+    expect(scheduler.previewPercent, isNull);
+    expect(tester.takeException(), isNull);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    scheduler.dispose();
+    connected.dispose();
+  });
+
+  testWidgets('闪控主键取消待发调速并立即停止助力', (tester) async {
+    final ble = BleService();
+    final connected = _ConnectedBleService(ble)..manual = true;
+    final scheduler = AssistRemoteScheduler(
+      ble: connected,
+      stepOf: () => 5,
+      onResult: (_) {},
+    );
+    await tester.pumpWidget(
+        _wrap(_screen(), connected, GpsService(), scheduler: scheduler));
+
+    scheduler.step(1);
+    await tester.pump();
+    expect(scheduler.previewPercent, 56);
+
+    await scheduler.stop();
+    await tester.pump();
+    expect(connected.stopCalls, 1);
+    expect(connected.requestedPercents, isEmpty);
+    expect(scheduler.previewPercent, isNull);
+
+    await tester.pump(const Duration(seconds: 2));
+    expect(connected.requestedPercents, isEmpty, reason: '停止后不应再补发调速指令');
+    expect(tester.widget<Slider>(_key('assist-slider')).value, 0);
+    expect(tester.takeException(), isNull);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    scheduler.dispose();
+    connected.dispose();
+  });
+
+  testWidgets('未连接时助力卡显示去连接入口并可跳转设备页', (tester) async {
+    var opened = 0;
+    final ble = BleService();
+    ble.bikeData.clearReadOnlyAvailability();
+    await tester.pumpWidget(_wrap(
+      _screen(onOpenDevices: () => opened++),
+      ble,
+      GpsService(),
+    ));
+
+    expect(find.text('未连接控制器'), findsOneWidget);
+    expect(find.text('去连接'), findsOneWidget);
+    expect(_key('demo-badge'), findsNothing);
+    await tester.tap(find.text('去连接'));
+    await tester.pump();
+    expect(opened, 1);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('窄屏 360×560 不溢出，三列副表同行且大里程不截断', (tester) async {
     final ble = BleService();
     ble.bikeData.clearReadOnlyAvailability();
     ble.bikeData.speed = 18.2;
     ble.bikeData.speedAvailable = true;
+    ble.bikeData.tripDistance = 123.4;
+    ble.bikeData.tripAvailable = true;
     final connected = _ConnectedBleService(ble);
-    await tester.pumpWidget(MultiProvider(
-      providers: [
-        ChangeNotifierProvider<BleService>.value(value: connected),
-        ChangeNotifierProvider<GpsService>(create: (_) => GpsService()),
-      ],
-      child: const MaterialApp(home: Scaffold(body: DashboardScreen())),
+    await tester.pumpWidget(_wrap(
+      const MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: SizedBox(width: 360, height: 560, child: DashboardScreen()),
+          ),
+        ),
+      ),
+      connected,
+      GpsService(),
     ));
-    expect(find.text('18.2'), findsOneWidget);
-    expect(tester.widget<Text>(find.byKey(const ValueKey('secondary-speed'))).data, '--');
-    expect(find.text('GPS'), findsOneWidget);
-    expect(find.text('对比未开启'), findsOneWidget);
+
+    expect(tester.takeException(), isNull);
+    final avgY = tester.getCenter(_key('sub-tag-AVG')).dy;
+    for (final tag in ['MAX', 'km']) {
+      expect((tester.getCenter(_key('sub-tag-$tag')).dy - avgY).abs(),
+          lessThan(2));
+    }
+    // 123.4 必须扩展为 3 位整数，不能被截成 23.4。
+    expect(_segment(tester, 'sub-value-km').text, '123.4');
+    expect(_segment(tester, 'sub-value-km').integerDigits, 3);
+    expect(_segment(tester, 'sub-value-km').semanticsLabel, '123.4 km');
+    expect(find.text('骑行时间'), findsNothing);
+    expect(_key('ride-time'), findsNothing);
+
     await tester.pumpWidget(const SizedBox.shrink());
     connected.dispose();
     ble.bikeData.clearReadOnlyAvailability();
   });
 
-  testWidgets('连接后电压可见，未取得百分比时不误报 0%', (tester) async {
+  testWidgets('演示模式开启且未连接时，首页各分区填充循环演示数据', (tester) async {
+    final demo = DemoModeSettings();
+    await demo.setEnabled(true);
     final ble = BleService();
     ble.bikeData.clearReadOnlyAvailability();
-    ble.bikeData.voltage = 38.5;
-    ble.bikeData.batteryLevel = 0;
-    ble.bikeData.batteryLevelAvailable = false;
-    final connected = _ConnectedBleService(ble);
+    // 注入可推进的时钟，让循环数据在一屏内稳定复现并可验证档位切换。
+    var now = DateTime(2026, 11, 15, 10);
     await tester.pumpWidget(
-      MultiProvider(
-        providers: [
-          ChangeNotifierProvider<BleService>.value(value: connected),
-          ChangeNotifierProvider<GpsService>(create: (_) => GpsService()),
-        ],
-        child: const MaterialApp(home: Scaffold(body: DashboardScreen())),
-      ),
-    );
-    expect(find.text('38.5 V'), findsOneWidget);
-    expect(find.text('0%'), findsNothing);
-    expect(find.text('电量 --'), findsOneWidget);
-    expect(find.text('尚未读取'), findsOneWidget);
-    expect(find.text('蓝牙车体倾角'), findsNothing);
-    expect(find.text('--'), findsWidgets);
+        _wrap(_screen(demoClock: () => now), ble, GpsService(), demo: demo));
+
+    expect(_key('demo-badge'), findsNothing);
+    expect(find.text('演示数据'), findsNothing);
+
+    final speed = double.parse(_segment(tester, 'primary-speed').text!);
+    expect(speed, greaterThan(21.0));
+    expect(speed, lessThan(27.0));
+    expect(_segment(tester, 'sub-value-AVG').text, '18.6');
+    expect(_segment(tester, 'sub-value-MAX').text, '36.8');
+    expect(_segment(tester, 'sub-value-km').text, '12.7');
+    expect(_segment(tester, 'sub-value-km').semanticsLabel, '12.7 km');
+    // 演示骑行时间已移到顶部状态栏，首页不再显示。
+    expect(_key('ride-time'), findsNothing);
+    // 坡度随时间循环，取注入时钟当前时刻的值。
+    expect(find.text(DemoRideData.slopeAt(now).toStringAsFixed(1)),
+        findsOneWidget);
+
+    // 电量 / 电压 / 温度取当前时刻的循环值，并按同一档位规则上色。
+    void expectSensorsAt(DateTime t) {
+      final battery = DemoRideData.batteryAt(t);
+      final temp = DemoRideData.temperatureAt(t);
+      expect(find.text('$battery%'), findsOneWidget,
+          reason: '${t.second} 秒的电量');
+      expect(find.text(DemoRideData.voltageAt(t).toStringAsFixed(1)),
+          findsOneWidget);
+      expect(find.text(temp.toStringAsFixed(1)), findsOneWidget);
+      expect(_textColor(tester, 'battery-percent'),
+          SensorStatus.batteryColor(battery));
+      expect(_textColor(tester, 'battery-voltage'),
+          SensorStatus.batteryColor(battery));
+      expect(_textColor(tester, 'temperature-value'),
+          SensorStatus.temperatureColor(temp));
+      expect(
+          find.text(SensorStatus.temperatureBandLabel(temp)), findsOneWidget);
+      expect(
+        tester
+            .widget<FractionallySizedBox>(find.descendant(
+              of: _key('battery-bar'),
+              matching: find.byType(FractionallySizedBox),
+            ))
+            .widthFactor,
+        battery / 100,
+      );
+    }
+
+    expectSensorsAt(now);
+
+    // 时间推进后电量和温度同步变化，配色与进度条跟着切换（循环预览效果）。
+    now = now.add(const Duration(seconds: 6));
+    await tester.pump(const Duration(milliseconds: 600));
+    expect(
+        DemoRideData.batteryAt(now),
+        isNot(
+            DemoRideData.batteryAt(now.subtract(const Duration(seconds: 6)))));
+    expectSensorsAt(now);
+
+    expect(find.text('助力控制'), findsOneWidget);
+    expect(find.text('未连接控制器'), findsNothing);
+    expect(_key('assist-slider'), findsOneWidget);
+    expect(find.textContaining('不会下发指令'), findsOneWidget);
+    expect(find.textContaining('km/h'), findsNothing);
+    expect(tester.takeException(), isNull);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('运行中切换演示开关，首页即时在真实与演示数据间切换', (tester) async {
+    final demo = DemoModeSettings();
+    final ble = BleService();
+    ble.bikeData.clearReadOnlyAvailability();
+    await tester.pumpWidget(_wrap(_screen(), ble, GpsService(), demo: demo));
+
+    expect(_key('demo-badge'), findsNothing);
+    expect(_segment(tester, 'primary-speed').text, isNull);
+
+    await demo.setEnabled(true);
+    await tester.pump();
+    expect(_key('demo-badge'), findsNothing);
+    expect(_segment(tester, 'primary-speed').text, isNotNull);
+
+    await demo.setEnabled(false);
+    await tester.pump();
+    expect(_key('demo-badge'), findsNothing);
+    expect(_segment(tester, 'primary-speed').text, isNull);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('演示开关开启但已连接控制器时，仍显示真实数据', (tester) async {
+    final demo = DemoModeSettings();
+    await demo.setEnabled(true);
+    final ble = BleService();
+    ble.bikeData.speed = 12.3;
+    ble.bikeData.speedAvailable = true;
+    ble.bikeData.tripDistance = 1.5;
+    ble.bikeData.tripAvailable = true;
+    final connected = _ConnectedBleService(ble);
+    await tester
+        .pumpWidget(_wrap(_screen(), connected, GpsService(), demo: demo));
+
+    expect(_key('demo-badge'), findsNothing);
+    expect(_segment(tester, 'primary-speed').text, '12.3');
+    expect(_segment(tester, 'sub-value-km').text, '1.5');
+    expect(_key('ride-time'), findsNothing);
+
     await tester.pumpWidget(const SizedBox.shrink());
     connected.dispose();
-    ble.bikeData.voltage = 0;
+    ble.bikeData.clearReadOnlyAvailability();
+  });
+
+  testWidgets('演示模式下助力加减只改本地数值，不下发任何指令', (tester) async {
+    final demo = DemoModeSettings();
+    await demo.setEnabled(true);
+    final ble = BleService();
+    ble.bikeData.clearReadOnlyAvailability();
+    await tester.pumpWidget(_wrap(_screen(), ble, GpsService(), demo: demo));
+
+    expect(tester.widget<Slider>(_key('assist-slider')).value,
+        DemoRideData.assistPercent.toDouble());
+    await tester.tap(_key('assist-plus'));
+    await tester.pump();
+    expect(tester.widget<Slider>(_key('assist-slider')).value,
+        (DemoRideData.assistPercent + 5).toDouble());
+    await tester.tap(_key('assist-minus'));
+    await tester.pump();
+    expect(tester.widget<Slider>(_key('assist-slider')).value,
+        DemoRideData.assistPercent.toDouble());
+    expect(find.text('未连接设备'), findsNothing);
+    expect(find.text('去连接'), findsNothing);
+    expect(tester.takeException(), isNull);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('演示模式下副速度对比开关仍联动，且使用演示副速度', (tester) async {
+    final demo = DemoModeSettings();
+    await demo.setEnabled(true);
+    final gps = _TestGpsService();
+    await tester.pumpWidget(_wrap(_screen(), BleService(), gps, demo: demo));
+
+    expect(_key('secondary-speed'), findsNothing);
+    gps.setCompare(true);
+    await tester.pump();
+    expect(_key('secondary-speed'), findsOneWidget);
+    expect(_segment(tester, 'secondary-speed').text, '23.4');
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('未连控制器时不再重复显示闪控状态（已移到顶部状态栏）', (tester) async {
+    await tester.pumpWidget(_wrap(
+      _screen(),
+      BleService(),
+      GpsService(),
+      remote: _FakeRemote(connected: true),
+    ));
+    expect(find.text('闪控已连接'), findsNothing);
+    expect(_key('remote-status-prompt'), findsNothing);
+    expect(_key('remote-glyph'), findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('闪控上/下键会让控制面板对应的加减按钮显示按下效果', (tester) async {
+    final ble = BleService();
+    final connected = _ConnectedBleService(ble);
+    final scheduler = AssistRemoteScheduler(
+      ble: connected,
+      stepOf: () => 5,
+      onResult: (_) {},
+    );
+    await tester.pumpWidget(_wrap(_screen(), connected, GpsService(),
+        scheduler: scheduler));
+
+    Color buttonColor(String key) {
+      final box = tester.widget<AnimatedContainer>(find
+          .descendant(
+              of: find.byKey(ValueKey(key)), matching: find.byType(AnimatedContainer))
+          .first);
+      return (box.decoration! as BoxDecoration).color!;
+    }
+
+    final normal = buttonColor('assist-plus');
+    expect(normal, isNot(DashColors.orange));
+
+    // 闪控上键 → 加号按钮高亮。
+    scheduler.step(1);
+    await tester.pump();
+    expect(buttonColor('assist-plus'), DashColors.orange.withValues(alpha: 0.9));
+    expect(buttonColor('assist-minus'), isNot(DashColors.orange));
+
+    // 闪控下键 → 减号按钮高亮。
+    scheduler.step(-1);
+    await tester.pump();
+    expect(buttonColor('assist-minus'), DashColors.orange.withValues(alpha: 0.9));
+    expect(buttonColor('assist-plus'), isNot(DashColors.orange));
+
+    scheduler.dispose();
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('陀螺仪双向条：中心跟随方向色、下坡绿、上坡红、平路仅中心亮',
+      (tester) async {
+    final idle = Colors.white.withValues(alpha: 0.09);
+
+    Color cell(int i) {
+      final box = tester.widget<Container>(_key('slope-segment-$i'));
+      return (box.decoration! as BoxDecoration).color!;
+    }
+
+    Future<void> pumpSlope(double? slope) async {
+      final ble = BleService();
+      ble.bikeData.clearReadOnlyAvailability();
+      if (slope != null) {
+        ble.bikeData.slope = slope;
+        ble.bikeData.gyroAngleAvailable = true;
+      }
+      await tester.pumpWidget(
+          _wrap(_screen(), _ConnectedBleService(ble), GpsService()));
+    }
+
+    // 无数据：11 格全部熄灭（灰）。
+    await pumpSlope(null);
+    expect(find.byKey(const ValueKey('slope-bar')), findsOneWidget);
+    for (var i = 0; i < 11; i++) {
+      expect(cell(i), idle, reason: '无数据时第 $i 格应熄灭');
+    }
+
+    // 下坡 -12°：level=2，中心也变绿，左侧 3/4 绿，其余灰。
+    await pumpSlope(-12);
+    expect(cell(5), DashColors.green);
+    expect(cell(3), DashColors.green);
+    expect(cell(4), DashColors.green);
+    expect(cell(6), idle, reason: '下坡时右侧不填充');
+    expect(cell(0), idle);
+
+    // 上坡 12°：level=2，中心也变红，右侧 6/7 红，其余灰。
+    await pumpSlope(12);
+    expect(cell(5), DashColors.red);
+    expect(cell(6), DashColors.red);
+    expect(cell(7), DashColors.red);
+    expect(cell(4), idle, reason: '上坡时左侧不填充');
+    expect(cell(10), idle);
+
+    // 平路 0.4°：level=0，仅中心蓝格亮。
+    await pumpSlope(0.4);
+    expect(cell(5), DashColors.blue);
+    for (var i = 0; i < 11; i++) {
+      if (i == 5) continue;
+      expect(cell(i), idle, reason: '平路时第 $i 格应熄灭');
+    }
+
+    await tester.pumpWidget(const SizedBox.shrink());
   });
 }

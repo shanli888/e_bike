@@ -1,5 +1,10 @@
 import 'package:flutter/material.dart';
 
+/// 全局 ScaffoldMessenger：服务层（闪控按键回调、助力调速调度器）没有
+/// BuildContext，也能把结果弹成 toast。挂在 MaterialApp 上即可。
+final GlobalKey<ScaffoldMessengerState> appScaffoldMessengerKey =
+    GlobalKey<ScaffoldMessengerState>();
+
 /// 统一的提示弹窗：标题 + 说明 + 可选主操作
 Future<void> showAppDialog(
   BuildContext context, {
@@ -43,23 +48,58 @@ Future<void> showAppDialog(
   );
 }
 
-/// 轻提示（SnackBar）
+SnackBar _buildSnackBar(
+  String message, {
+  required bool error,
+  required bool warning,
+  required Duration duration,
+}) {
+  return SnackBar(
+    content: Text(message),
+    backgroundColor: error
+        ? Colors.red.shade700
+        : warning
+            ? Colors.orange.shade800
+            : Colors.green.shade700,
+    behavior: SnackBarBehavior.floating,
+    duration: duration,
+  );
+}
+
+/// 轻提示（SnackBar）：页面内调用，带 BuildContext。
+/// 连续操作时直接替换当前 toast，避免提示排队堆积。
 void showAppToast(
   BuildContext context,
   String message, {
   bool error = false,
   bool warning = false,
+  Duration duration = const Duration(seconds: 2),
 }) {
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(
-      content: Text(message),
-      backgroundColor: error
-          ? Colors.red.shade700
-          : warning
-              ? Colors.orange.shade800
-              : Colors.green.shade700,
-      behavior: SnackBarBehavior.floating,
-      duration: const Duration(seconds: 2),
-    ),
-  );
+  final messenger = ScaffoldMessenger.of(context);
+  messenger.removeCurrentSnackBar();
+  messenger.showSnackBar(_buildSnackBar(
+    message,
+    error: error,
+    warning: warning,
+    duration: duration,
+  ));
+}
+
+/// 服务层用的轻提示：没有 context 时（例如 widget 测试）安全跳过。
+void showGlobalToast(
+  String message, {
+  bool error = false,
+  bool warning = false,
+  Duration duration = const Duration(seconds: 2),
+  bool replace = true,
+}) {
+  final messenger = appScaffoldMessengerKey.currentState;
+  if (messenger == null) return;
+  if (replace) messenger.removeCurrentSnackBar();
+  messenger.showSnackBar(_buildSnackBar(
+    message,
+    error: error,
+    warning: warning,
+    duration: duration,
+  ));
 }

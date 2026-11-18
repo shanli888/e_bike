@@ -5,7 +5,10 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   const imei = '123456789012345';
-  List<int> bytes(String hex) => [for (var i = 0; i < hex.length; i += 2) int.parse(hex.substring(i, i + 2), radix: 16)];
+  List<int> bytes(String hex) => [
+        for (var i = 0; i < hex.length; i += 2)
+          int.parse(hex.substring(i, i + 2), radix: 16)
+      ];
 
   test('原厂 C4 模式映射和帧编码', () {
     expect(AssistMode.manual.code, 1);
@@ -18,7 +21,8 @@ void main() {
       expect(LvbuProtocol.toHex(LvbuModeCommand.set(mode, imei)),
           'C4F$imei${mode.code.toString().padLeft(2, '0')}');
     }
-    expect(() => LvbuModeCommand.set(AssistMode.manual, '123'), throwsArgumentError);
+    expect(() => LvbuModeCommand.set(AssistMode.manual, '123'),
+        throwsArgumentError);
   });
 
   test('A5 百分比采用两位十进制编码并限制范围', () {
@@ -29,6 +33,13 @@ void main() {
     expect(() => LvbuAssistPercentCommand.set(-1, imei), throwsRangeError);
     expect(() => LvbuAssistPercentCommand.set(100, imei), throwsRangeError);
     expect(() => LvbuAssistPercentCommand.set(51, '123'), throwsArgumentError);
+  });
+
+  test('停止助力没有独立命令字，等价于原厂的 A5 百分比 0', () {
+    // 原厂 WindowWidgetProvider.clickStopHelp → setHelpProgress(0)
+    // → A5F<IMEI>00。旧 AA55 / 0x22 是误用 APK 的推测码，不用于实车。
+    expect(LvbuProtocol.toHex(LvbuAssistPercentCommand.set(0, imei)),
+        'A5F${imei}00');
   });
 
   test('A5 回包验证设备、分片、状态和百分比', () {
@@ -57,5 +68,23 @@ void main() {
     expect(rejected?.mode, isNull);
     expect(parser.feed(bytes('C4F${imei}0199')), isNull);
     expect(parser.feed(bytes('C4F${imei}0101'))?.mode, AssistMode.manual);
+  });
+
+  test('写入被回显时不会把回显帧当成失败回复', () {
+    // 设备把写入帧原样回显（20 字节），随后才是真正的 22 字节回复。
+    final echo = bytes('A5F${imei}00');
+    final reply = bytes('A5F${imei}0100');
+    final parser = LvbuAssistPercentReplyParser(imei);
+    expect(parser.feed(echo), isNull);
+    final result = parser.feed(reply);
+    expect(result?.status, 1, reason: '回显帧不应被当成设备拒绝');
+    expect(result?.percent, 0, reason: '停止助力的回复应为 0%');
+
+    // 模式帧同理。
+    final modeParser = LvbuModeReplyParser(imei);
+    expect(modeParser.feed(bytes('C4F${imei}01')), isNull);
+    final modeResult = modeParser.feed(bytes('C4F${imei}0101'));
+    expect(modeResult?.status, 1);
+    expect(modeResult?.mode, AssistMode.manual);
   });
 }

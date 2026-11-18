@@ -30,7 +30,7 @@ class BleCommands {
   /// 助力/骑行模式（通勤/运动/爬坡/休闲/手动）
   static const int cmdAssistMode = 0x21;
 
-  /// 停止助力
+  /// 停止助力（旧 AA55 推测码，已停用；实车请用 `BleService.stopAssist()`）
   static const int cmdAssistStop = 0x22;
 
   /// 手动模式下的助力百分比 0~100
@@ -80,7 +80,8 @@ class BleCommands {
   static List<int> assistMode(int modeCode) =>
       frame(cmdAssistMode, [modeCode & 0xFF]);
 
-  /// 停止助力
+  /// 停止助力。⚠️ 仅保留给旧协议单测，不要用于实车：
+  /// 原厂 LVBU 3.4.0 的停止助力是 `A5F<IMEI>00`，见 `BleService.stopAssist()`。
   static List<int> assistStop() => frame(cmdAssistStop, [0x00]);
 
   /// 手动模式的助力百分比（0~100%）

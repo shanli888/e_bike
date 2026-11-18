@@ -1,0 +1,22 @@
+DSEG7 Font Family
+=================
+
+Copyright (c) keshikan (https://www.keshikan.net)
+Project: https://github.com/keshikan/DSEG
+License: SIL Open Font License, Version 1.1
+         https://openfontlicense.org / https://scripts.sil.org/OFL
+
+The font files in this directory (SEGClassic.ttf, SEGClassicThin.ttf,
+SEGMini.ttf) were extracted from the "speedometer-redesign" design prototype,
+where they were embedded as base64 WOFF2 under the @font-face names
+SEGClassic / SEGClassicThin / SEGMini. They were converted to TTF with
+fontTools so Flutter can load them as bundled assets. The glyph outlines are
+unchanged.
+
+DSEG is free for both commercial and non-commercial use, and may be modified
+and redistributed under the SIL OFL 1.1. When redistributing the font files
+themselves, retain this notice and the OFL 1.1 license text. Bundling the
+fonts inside an application does not require the license text to be shipped
+(OFL-FAQ 1.10 / 1.11), but this notice is kept for attribution.
+
+Note: the reserved font name is "DSEG".

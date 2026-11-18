@@ -10,6 +10,7 @@ import '../models/device_settings.dart';
 import '../models/frame_log.dart';
 import 'ble_commands.dart';
 import 'ble_constants.dart';
+import 'br80_protocol.dart';
 import 'local_wheel_settings.dart';
 import 'remembered_device.dart';
 import 'lvbu_protocol.dart';
@@ -110,13 +111,25 @@ class BleService extends ChangeNotifier {
   LvbuReadOnlyPoller? _lvbuPoller;
   final Map<LvbuReadCommand, DateTime> _lvbuLastSuccess = {};
   final Set<LvbuReadCommand> _lvbuFailures = {};
+
+  /// 停止助力等「安全动作」正在抢占链路：只读轮询暂时让路。
+  bool _assistPriorityWrite = false;
+
+  /// A5 助力写入的冷却时间点：只用来挡住连续狂刷，不再长时间堵死链路。
+  DateTime? _assistWriteCooldownAt;
+
+  /// 停止助力最多等待链路空闲多久（只读查询 / 上一次写入结束后即可发送）。
+  static const Duration _priorityWaitBudget = Duration(seconds: 8);
+  static const Duration _assistWriteCooldown = Duration(milliseconds: 1500);
+
   bool get lvbuProbeRunning => _lvbuProbeRunning;
   bool _statusProbeRunning = false;
   bool _statusProbeCancelled = false;
   bool get statusProbeRunning => _statusProbeRunning;
 
   bool _protectLvbuIdentity(String source) =>
-      _lvbuProbeRunning || _lvbuReplyGuard ||
+      _lvbuProbeRunning ||
+      _lvbuReplyGuard ||
       (_isConnected && (source == 'ffe1' || source.endsWith('/ffe1')));
 
   /// 记录一条设备通知（供嗅探与探测共用）
@@ -186,10 +199,12 @@ class BleService extends ChangeNotifier {
   bool get hasCtrlChannel => _ctrlChar != null;
 
   /// 当前下发命令用的特征（短 UUID）
-  String get writeCharLabel => _shortUuid(_writeChar?.characteristicUuid.toString());
+  String get writeCharLabel =>
+      _shortUuid(_writeChar?.characteristicUuid.toString());
 
   /// 当前接收通知的特征（短 UUID）
-  String get notifyCharLabel => _shortUuid(_notifyChar?.characteristicUuid.toString());
+  String get notifyCharLabel =>
+      _shortUuid(_notifyChar?.characteristicUuid.toString());
 
   // 协议调试日志（最近 300 条）
   final List<FrameLog> _logs = [];
@@ -222,11 +237,16 @@ class BleService extends ChangeNotifier {
     _lvbuReplyGuardTimer?.cancel();
     _lvbuReplyGuard = _lvbuProbeRunning;
     _bikeData.clearReadOnlyAvailability();
+    // 助力控制默认按「手动」展示；每次重新连接仍回到这个本地默认值。
+    _assistMode = AssistMode.manual;
     _assistModeConfirmed = false;
     _assistPercentConfirmed = false;
     _assistPercent = 51;
+    // 连上后等电量与速度都读到，再下发一次手动模式，保证设备侧与界面一致。
+    _manualModeSyncPending = true;
     if (_modeWriteRunning && _modeWriteStarted) _modeOutcomeUncertain = true;
   }
+
   BikeData get bikeData => _bikeData;
 
   // 设备设置
@@ -240,15 +260,17 @@ class BleService extends ChangeNotifier {
   int _assistLevel = 0;
   int get assistLevel => _assistLevel;
 
-  AssistMode _assistMode = AssistMode.commute;
+  /// 本地默认按手动模式展示（设备无离线模式查询，未确认也先显示手动）。
+  AssistMode _assistMode = AssistMode.manual;
   AssistMode get assistMode => _assistMode;
   bool _assistModeConfirmed = false;
   bool get assistModeConfirmed => _assistModeConfirmed;
   String get assistModeStatus => _assistModeConfirmed
       ? '${_assistMode.label} · 本次设置已确认'
-      : _cachedAssistMode == null
-          ? '模式未知（无离线查询）'
-          : '上次设置：${_cachedAssistMode!.label}（当前未知）';
+      : '${_assistMode.label}（默认）';
+
+  /// 连接成功后是否等待「读到电量 + 速度」再下发一次手动模式。
+  bool _manualModeSyncPending = false;
 
   /// 默认位置仅供选择，不代表设备的当前百分比。
   int _assistPercent = 51;
@@ -316,7 +338,9 @@ class BleService extends ChangeNotifier {
 
     _lastDevice = await _rememberedStore.loadDevice();
     if (_lastDevice != null) {
-      try { _cachedAssistMode = await _rememberedStore.loadMode(_lastDevice!.id); } catch (_) {}
+      try {
+        _cachedAssistMode = await _rememberedStore.loadMode(_lastDevice!.id);
+      } catch (_) {}
     }
     if (_disposed) return;
     notifyListeners();
@@ -335,7 +359,9 @@ class BleService extends ChangeNotifier {
   void _onScanResults(List<ScanResult> results) {
     _filterScanResults(results);
     final last = _lastDevice;
-    if (!_autoConnectPending || last == null || _isConnected || _isConnecting) return;
+    if (!_autoConnectPending || last == null || _isConnected || _isConnecting) {
+      return;
+    }
     for (final result in results) {
       if (result.device.remoteId.str == last.id) {
         _autoConnectPending = false;
@@ -355,12 +381,17 @@ class BleService extends ChangeNotifier {
     final seen = <String>{};
     for (var r in results) {
       final name = r.device.platformName;
-      if (name.isEmpty) continue;
+      // H5 用广播里的 A2A0 service UUID 发现闪控：广播名可能为空或不叫 BlingRemote
+      final isRemote = Br80Protocol.matchesScan(
+        name: name,
+        advertisedUuids: r.advertisementData.serviceUuids,
+      );
+      if (name.isEmpty && !isRemote) continue;
       if (!_showAllDevices) {
         final upper = name.toUpperCase();
         final matched = BleConstants.deviceNamePrefixes
             .any((prefix) => upper.contains(prefix.toUpperCase()));
-        if (!matched) continue;
+        if (!matched && !isRemote) continue;
       }
       if (seen.add(r.device.remoteId.str)) {
         _devices.add(r);
@@ -412,7 +443,9 @@ class BleService extends ChangeNotifier {
   /// 开始扫描设备，返回是否成功启动
   Future<bool> startScan() async {
     if (_isScanning) return true;
-    if (_lastDevice != null && !_isConnected && !_isConnecting) _autoConnectPending = true;
+    if (_lastDevice != null && !_isConnected && !_isConnecting) {
+      _autoConnectPending = true;
+    }
 
     final state = await readAdapterState();
     if (state == BluetoothAdapterState.off) {
@@ -465,17 +498,30 @@ class BleService extends ChangeNotifier {
       (result) => result.device.remoteId == device.remoteId,
     );
     if (matchingScans.isEmpty) {
-      _addLog(FrameLog(time: DateTime.now(), outgoing: false, data: const [],
+      _addLog(FrameLog(
+          time: DateTime.now(),
+          outgoing: false,
+          data: const [],
           source: '广播协议线索: 未找到该设备的扫描数据，无法判断'));
     } else {
       final scan = matchingScans.first;
       final serviceKeys = scan.advertisementData.serviceData.keys
-          .map(UuidUtil.normalize).toList()..sort();
+          .map(UuidUtil.normalize)
+          .toList()
+        ..sort();
       final marker = serviceKeys.contains('2a04');
-      _addLog(FrameLog(time: DateTime.now(), outgoing: false, data: const [],
-          source: '广播 serviceData UUID: ${serviceKeys.isEmpty ? "无" : serviceKeys.join(", ")}'));
-      _addLog(FrameLog(time: DateTime.now(), outgoing: false, data: const [],
-          source: '广播 2A04 标记: ${marker ? "存在" : "未发现"}；旧 APK 的协议判断已作废，不等同于 GATT 特征'));
+      _addLog(FrameLog(
+          time: DateTime.now(),
+          outgoing: false,
+          data: const [],
+          source:
+              '广播 serviceData UUID: ${serviceKeys.isEmpty ? "无" : serviceKeys.join(", ")}'));
+      _addLog(FrameLog(
+          time: DateTime.now(),
+          outgoing: false,
+          data: const [],
+          source:
+              '广播 2A04 标记: ${marker ? "存在" : "未发现"}；旧 APK 的协议判断已作废，不等同于 GATT 特征'));
     }
 
     try {
@@ -510,7 +556,7 @@ class BleService extends ChangeNotifier {
       if (Platform.isAndroid) {
         try {
           await device.requestConnectionPriority(
-            connectionPriorityRequest: ConnectionPriority.high);
+              connectionPriorityRequest: ConnectionPriority.high);
         } catch (_) {}
       }
 
@@ -537,7 +583,8 @@ class BleService extends ChangeNotifier {
       );
       try {
         await _rememberedStore.saveDevice(_lastDevice!);
-        _cachedAssistMode = await _rememberedStore.loadMode(device.remoteId.str);
+        _cachedAssistMode =
+            await _rememberedStore.loadMode(device.remoteId.str);
       } catch (_) {}
       // 原厂源码中的只读命令串行轮询；除电压外仍待设备验证。
       _startLvbuReadOnlyPolling(device);
@@ -556,7 +603,12 @@ class BleService extends ChangeNotifier {
   /// 重新发现 GATT 服务并选择通信特征（用于调试）
   Future<void> rediscoverServices() async {
     final device = _connectedDevice;
-    if (device == null || !_isConnected || _lvbuProbeRunning || _manualWriteRunning) return;
+    if (device == null ||
+        !_isConnected ||
+        _lvbuProbeRunning ||
+        _manualWriteRunning) {
+      return;
+    }
     _lvbuPoller?.stop();
     _manualWriteRunning = true;
     try {
@@ -647,7 +699,8 @@ class BleService extends ChangeNotifier {
       }
 
       for (var char in svc.characteristics) {
-        debugPrint('  特征: ${UuidUtil.normalize(char.characteristicUuid)} (prop: ${char.properties})');
+        debugPrint(
+            '  特征: ${UuidUtil.normalize(char.characteristicUuid)} (prop: ${char.properties})');
       }
     }
 
@@ -669,8 +722,16 @@ class BleService extends ChangeNotifier {
 
     // 自定义服务 UUID 白名单（全部归一化为短码，避免长/短格式不匹配）
     final customServiceUuids = {
-      'ffe0', 'ffe1', 'ffe2', 'ffe3', 'ff00', 'ff01',
-      'ffd0', 'ffd1', 'ffd2', 'ffd3',
+      'ffe0',
+      'ffe1',
+      'ffe2',
+      'ffe3',
+      'ff00',
+      'ff01',
+      'ffd0',
+      'ffd1',
+      'ffd2',
+      'ffd3',
       '3eb685db-65f9-4cf6-a03a-e3ef65729f3d',
       'fdd39ad0-238f-46af-adb4-6c85480369c7',
     };
@@ -690,7 +751,8 @@ class BleService extends ChangeNotifier {
       for (final c in svc.characteristics) {
         final cu = UuidUtil.normalize(c.characteristicUuid);
         final props = _describeProperties(c.properties);
-        final canWrite = c.properties.write || c.properties.writeWithoutResponse;
+        final canWrite =
+            c.properties.write || c.properties.writeWithoutResponse;
         final canNotify = c.properties.notify || c.properties.indicate;
 
         debugPrint('    特征: $cu ($props)');
@@ -728,7 +790,8 @@ class BleService extends ChangeNotifier {
       debugPrint('[警告] 未找到 FFE1 私有通知特征！');
     }
 
-    debugPrint('最终: 写=${_writeChar?.characteristicUuid}  通知=${_notifyChar?.characteristicUuid}');
+    debugPrint(
+        '最终: 写=${_writeChar?.characteristicUuid}  通知=${_notifyChar?.characteristicUuid}');
 
     // 把完整 GATT 树写入调试日志，方便复制导出分析
     _dumpGattTreeToLog();
@@ -787,8 +850,12 @@ class BleService extends ChangeNotifier {
   }
 
   bool _isStandardService(String su) =>
-      su == '180f' || su == '180a' || su == '1816' || su == '1818' ||
-      su == '1801' || su == '1800';
+      su == '180f' ||
+      su == '180a' ||
+      su == '1816' ||
+      su == '1818' ||
+      su == '1801' ||
+      su == '1800';
 
   /// 订阅数据通知
   Future<void> _subscribeNotifications() async {
@@ -807,13 +874,20 @@ class BleService extends ChangeNotifier {
       try {
         _notifySub = notify.onValueReceived.listen(_handleNotification);
         await notify.setNotifyValue(true);
-        _addLog(FrameLog(time: DateTime.now(), outgoing: false,
-            data: const [], source: '通知订阅成功: ${UuidUtil.normalize(notify.characteristicUuid)}'));
+        _addLog(FrameLog(
+            time: DateTime.now(),
+            outgoing: false,
+            data: const [],
+            source:
+                '通知订阅成功: ${UuidUtil.normalize(notify.characteristicUuid)}'));
       } catch (e) {
         await _notifySub?.cancel();
         _notifySub = null;
-        _addLog(FrameLog(time: DateTime.now(), outgoing: false,
-            data: const [], source: '通知订阅失败: $e'));
+        _addLog(FrameLog(
+            time: DateTime.now(),
+            outgoing: false,
+            data: const [],
+            source: '通知订阅失败: $e'));
       }
     }
 
@@ -829,20 +903,27 @@ class BleService extends ChangeNotifier {
         try {
           await c.setNotifyValue(true);
           _privateNotifySubs.add(sub);
-          _addLog(FrameLog(time: DateTime.now(), outgoing: false,
-              data: const [], source: '通知订阅成功: $cu'));
+          _addLog(FrameLog(
+              time: DateTime.now(),
+              outgoing: false,
+              data: const [],
+              source: '通知订阅成功: $cu'));
         } catch (e) {
           await sub.cancel();
           rethrow;
         }
       } catch (e) {
-        _addLog(FrameLog(time: DateTime.now(), outgoing: false,
-            data: const [], source: '通知订阅失败 $cu: $e'));
+        _addLog(FrameLog(
+            time: DateTime.now(),
+            outgoing: false,
+            data: const [],
+            source: '通知订阅失败 $cu: $e'));
       }
     }
 
     // 2) 标准 CSC 测量（速度/踏频），设备支持时使用
-    for (final c in _cscService?.characteristics ?? const <BluetoothCharacteristic>[]) {
+    for (final c
+        in _cscService?.characteristics ?? const <BluetoothCharacteristic>[]) {
       if (UuidUtil.normalize(c.characteristicUuid) != '2a5b') {
         continue;
       }
@@ -869,6 +950,7 @@ class BleService extends ChangeNotifier {
             _bikeData.batteryLevelAvailable = true;
             _bikeData.batteryLevelEstimated = false;
             debugPrint('初始电量: ${_bikeData.batteryLevel}%');
+            _maybeSyncManualMode();
           }
         } catch (_) {}
 
@@ -883,6 +965,7 @@ class BleService extends ChangeNotifier {
                 _bikeData.batteryLevelEstimated = false;
                 debugPrint('电量推送: ${_bikeData.batteryLevel}%');
                 notifyListeners();
+                _maybeSyncManualMode();
               }
             });
             debugPrint('电池电量 notify 订阅成功');
@@ -893,7 +976,8 @@ class BleService extends ChangeNotifier {
       }
 
       // 30s 轮询 fallback（防止设备不支持 notify）
-      _batteryPollTimer = Timer.periodic(const Duration(seconds: 30), (_) async {
+      _batteryPollTimer =
+          Timer.periodic(const Duration(seconds: 30), (_) async {
         if (!_isConnected || _batteryService == null) return;
         for (final c in _batteryService!.characteristics) {
           if (UuidUtil.normalize(c.characteristicUuid) == '2a19') {
@@ -901,12 +985,15 @@ class BleService extends ChangeNotifier {
               final value = await c.read();
               if (value.isNotEmpty) {
                 final level = value[0] & 0xFF;
-                if (level <= 100 && (level != _bikeData.batteryLevel || !_bikeData.batteryLevelAvailable)) {
+                if (level <= 100 &&
+                    (level != _bikeData.batteryLevel ||
+                        !_bikeData.batteryLevelAvailable)) {
                   _bikeData.batteryLevel = level;
                   _bikeData.batteryLevelAvailable = true;
                   _bikeData.batteryLevelEstimated = false;
                   debugPrint('轮询电量: $level%');
                   notifyListeners();
+                  _maybeSyncManualMode();
                 }
               }
             } catch (_) {}
@@ -933,8 +1020,7 @@ class BleService extends ChangeNotifier {
     // 尝试解析数据帧（帧格式: 帧头 + 长度 + 命令 + 数据 + 校验）
     while (_dataBuffer.length >= 4) {
       // 查找帧头 (0xAA 0x55 或 0x5A)
-      final headerIndex = _dataBuffer.indexWhere(
-          (b) => b == 0xAA || b == 0x5A);
+      final headerIndex = _dataBuffer.indexWhere((b) => b == 0xAA || b == 0x5A);
       if (headerIndex < 0) break;
       if (headerIndex > 0) {
         _dataBuffer.removeRange(0, headerIndex);
@@ -963,7 +1049,8 @@ class BleService extends ChangeNotifier {
   void _parseDataFrame(List<int> frame) {
     if (frame.length < 4) return;
 
-    final payload = frame.length > 4 ? frame.sublist(4, frame.length - 1) : <int>[];
+    final payload =
+        frame.length > 4 ? frame.sublist(4, frame.length - 1) : <int>[];
 
     // CSC 测量数据 (Cycling Speed and Cadence)
     // 标准格式: flags(1) + wheel_rev(4) + last_wheel_event(2)
@@ -971,7 +1058,7 @@ class BleService extends ChangeNotifier {
     try {
       // 根据常见协议解析（需根据实际硬件调整）
       if (payload.length >= 8) {
-        _bikeData.speed = _bytesToUint16(payload, 0) / 10.0;     // km/h
+        _bikeData.speed = _bytesToUint16(payload, 0) / 10.0; // km/h
         _bikeData.avgSpeed = _bytesToUint16(payload, 2) / 10.0;
         _bikeData.maxSpeed = _bytesToUint16(payload, 4) / 10.0;
       }
@@ -982,19 +1069,19 @@ class BleService extends ChangeNotifier {
       }
 
       if (payload.length >= 16) {
-        _bikeData.batteryLevel = payload[15] & 0xFF;               // %
-        _bikeData.assistLevel = payload[16] & 0x07;                // 0-5
-        _assistLevel = _bikeData.assistLevel;                      // 同步 UI 状态
-        _bikeData.assistPower = _bytesToUint16(payload, 17);       // W
+        _bikeData.batteryLevel = payload[15] & 0xFF; // %
+        _bikeData.assistLevel = payload[16] & 0x07; // 0-5
+        _assistLevel = _bikeData.assistLevel; // 同步 UI 状态
+        _bikeData.assistPower = _bytesToUint16(payload, 17); // W
       }
 
       if (payload.length >= 21) {
-        _bikeData.slope = _bytesToInt16(payload, 19) / 10.0;      // 度
-        _bikeData.motorPower = _bytesToUint16(payload, 21);        // W
+        _bikeData.slope = _bytesToInt16(payload, 19) / 10.0; // 度
+        _bikeData.motorPower = _bytesToUint16(payload, 21); // W
       }
 
       if (payload.length >= 25) {
-        _bikeData.motorTemperature = payload[23] - 40;             // °C (偏移40)
+        _bikeData.motorTemperature = payload[23] - 40; // °C (偏移40)
         _bikeData.controllerTemperature = payload[24] - 40;
       }
 
@@ -1250,7 +1337,9 @@ class BleService extends ChangeNotifier {
     int padLen = 0,
     bool noRsp = false,
   }) async {
-    if (_lvbuProbeRunning || _manualWriteRunning || _statusProbeRunning) return '正在进行其他蓝牙操作，请稍后再试';
+    if (_lvbuProbeRunning || _manualWriteRunning || _statusProbeRunning) {
+      return '正在进行其他蓝牙操作，请稍后再试';
+    }
     final cleaned = hexText.replaceAll(RegExp(r'[^0-9a-fA-F]'), '');
     if (cleaned.isEmpty || cleaned.length.isOdd) return '请输入偶数个十六进制字符';
     var bytes = <int>[
@@ -1264,13 +1353,15 @@ class BleService extends ChangeNotifier {
       return '数据($bytes.length)超过填充长度($padLen)';
     }
 
-    final target = charShort != null ? findCharByShortUuid(charShort) : _writeChar;
+    final target =
+        charShort != null ? findCharByShortUuid(charShort) : _writeChar;
     if (target == null) return '目标特征不存在或未选中写通道';
 
     final useNoRsp = noRsp ||
         (!target.properties.write && target.properties.writeWithoutResponse);
 
-    final tag = '${charShort ?? writeCharLabel}${padLen > 0 ? '/补$padLen' : ''}${useNoRsp ? '/无应答' : ''}';
+    final tag =
+        '${charShort ?? writeCharLabel}${padLen > 0 ? '/补$padLen' : ''}${useNoRsp ? '/无应答' : ''}';
     _manualWriteRunning = true;
     try {
       await target.write(bytes, withoutResponse: useNoRsp);
@@ -1303,16 +1394,19 @@ class BleService extends ChangeNotifier {
       for (var i = 0; i < cleaned.length; i += 2)
         int.parse(cleaned.substring(i, i + 2), radix: 16),
     ];
-    final target = charShort != null ? findCharByShortUuid(charShort) : _writeChar;
+    final target =
+        charShort != null ? findCharByShortUuid(charShort) : _writeChar;
     if (target == null) return;
 
-    final useNoRsp = !target.properties.write && target.properties.writeWithoutResponse;
+    final useNoRsp =
+        !target.properties.write && target.properties.writeWithoutResponse;
     bool anySuccess = false;
     _addLog(FrameLog(
       time: DateTime.now(),
       outgoing: false,
       data: const [],
-      source: '===== 开始扫描写入长度 (${charShort ?? writeCharLabel}, ${useNoRsp ? "无应答" : "有应答"}) =====',
+      source:
+          '===== 开始扫描写入长度 (${charShort ?? writeCharLabel}, ${useNoRsp ? "无应答" : "有应答"}) =====',
     ));
 
     for (var len = 4; len <= 20; len++) {
@@ -1408,7 +1502,8 @@ class BleService extends ChangeNotifier {
     }
     await enableAlwaysOnSniff();
 
-    final useNoRsp = !target.properties.write && target.properties.writeWithoutResponse;
+    final useNoRsp =
+        !target.properties.write && target.properties.writeWithoutResponse;
     _addLog(FrameLog(
       time: DateTime.now(),
       outgoing: false,
@@ -1481,20 +1576,26 @@ class BleService extends ChangeNotifier {
   void stopStatusProbe() {
     if (!_statusProbeRunning) return;
     _statusProbeCancelled = true;
-    _addLog(FrameLog(time: DateTime.now(), outgoing: false, data: const [],
+    _addLog(FrameLog(
+        time: DateTime.now(),
+        outgoing: false,
+        data: const [],
         source: '状态专项测试: 已请求停止'));
   }
 
   /// 手动触发、有限次的候选只读查询；设备协议和响应关联仍待实机验证。
   Future<String> runStatusProbe() async {
-    if (_statusProbeRunning || _lvbuProbeRunning || _manualWriteRunning) return '已有操作正在运行';
+    if (_statusProbeRunning || _lvbuProbeRunning || _manualWriteRunning) {
+      return '已有操作正在运行';
+    }
     final device = _connectedDevice;
     if (!_isConnected || device == null) return '请先连接设备';
 
     final targets = <BluetoothCharacteristic>[];
     for (final id in ['ffe1', 'ffe2']) {
       final target = findCharByShortUuid(id);
-      if (target != null && (target.properties.write || target.properties.writeWithoutResponse)) {
+      if (target != null &&
+          (target.properties.write || target.properties.writeWithoutResponse)) {
         targets.add(target);
       }
     }
@@ -1503,8 +1604,13 @@ class BleService extends ChangeNotifier {
     _statusProbeRunning = true;
     _statusProbeCancelled = false;
     notifyListeners();
-    void log(String message, {bool outgoing = false, List<int> data = const []}) {
-      _addLog(FrameLog(time: DateTime.now(), outgoing: outgoing, data: data, source: message));
+    void log(String message,
+        {bool outgoing = false, List<int> data = const []}) {
+      _addLog(FrameLog(
+          time: DateTime.now(),
+          outgoing: outgoing,
+          data: data,
+          source: message));
     }
 
     final streams = <BluetoothCharacteristic>[];
@@ -1515,13 +1621,18 @@ class BleService extends ChangeNotifier {
       log('===== 状态专项测试开始：仅候选查询，协议未验证 =====');
       for (final c in _privateNotifyChars) {
         if (!(c.properties.notify || c.properties.indicate)) continue;
-        final tag = '${UuidUtil.normalize(c.serviceUuid)}/${UuidUtil.normalize(c.characteristicUuid)}';
+        final tag =
+            '${UuidUtil.normalize(c.serviceUuid)}/${UuidUtil.normalize(c.characteristicUuid)}';
         final sub = c.onValueReceived.listen((data) {
           final currentHit = hit;
-          if (data.isEmpty || currentHit == null || currentHit.isCompleted) return;
+          if (data.isEmpty || currentHit == null || currentHit.isCompleted) {
+            return;
+          }
           log('专项通知[$tag]', data: List<int>.from(data));
           final result = matchers[tag]?.feed(data);
-          if (result != null && !currentHit.isCompleted) currentHit.complete('$tag $result');
+          if (result != null && !currentHit.isCompleted) {
+            currentHit.complete('$tag $result');
+          }
         });
         subscriptions.add(sub);
         try {
@@ -1548,15 +1659,19 @@ class BleService extends ChangeNotifier {
             if (target.properties.write) false,
           ];
           for (final withoutResponse in modes) {
-            if (_statusProbeCancelled || !_isConnected || _connectedDevice != device) {
+            if (_statusProbeCancelled ||
+                !_isConnected ||
+                _connectedDevice != device) {
               log('专项测试已停止或连接断开');
               return '测试已停止或设备断开';
             }
-            final label = UuidUtil.normalize(target.characteristicUuid).toUpperCase();
+            final label =
+                UuidUtil.normalize(target.characteristicUuid).toUpperCase();
             final mode = withoutResponse ? '无应答' : '有应答';
             matchers.clear();
             for (final c in streams) {
-              final tag = '${UuidUtil.normalize(c.serviceUuid)}/${UuidUtil.normalize(c.characteristicUuid)}';
+              final tag =
+                  '${UuidUtil.normalize(c.serviceUuid)}/${UuidUtil.normalize(c.characteristicUuid)}';
               matchers[tag] = StatusResponseMatcher(query);
             }
             hit = Completer<String>();
@@ -1564,7 +1679,11 @@ class BleService extends ChangeNotifier {
             try {
               final chunks = WePowerProtocol.splitForMtu(query.frame, mtu);
               for (var i = 0; i < chunks.length; i++) {
-                if (_statusProbeCancelled || !_isConnected || _connectedDevice != device) break;
+                if (_statusProbeCancelled ||
+                    !_isConnected ||
+                    _connectedDevice != device) {
+                  break;
+                }
                 await target.write(chunks[i], withoutResponse: withoutResponse);
                 log('专项写入[$label/$mode ${i + 1}/${chunks.length}]',
                     outgoing: true, data: chunks[i]);
@@ -1572,13 +1691,17 @@ class BleService extends ChangeNotifier {
                   await Future<void>.delayed(const Duration(milliseconds: 100));
                 }
               }
-              if (_statusProbeCancelled || !_isConnected || _connectedDevice != device) {
+              if (_statusProbeCancelled ||
+                  !_isConnected ||
+                  _connectedDevice != device) {
                 log('专项测试已停止或连接断开');
                 return '测试已停止或设备断开';
               }
               final deadline = DateTime.now().add(const Duration(seconds: 2));
               String? result;
-              while (!_statusProbeCancelled && _isConnected && _connectedDevice == device &&
+              while (!_statusProbeCancelled &&
+                  _isConnected &&
+                  _connectedDevice == device &&
                   DateTime.now().isBefore(deadline)) {
                 result = await Future.any<String?>([
                   hit.future,
@@ -1590,7 +1713,9 @@ class BleService extends ChangeNotifier {
                 log('★ 候选回复 ${query.name} ← $result；尚不能证明与该次请求严格关联');
                 return '收到候选数据，请复制日志核对';
               }
-              if (_statusProbeCancelled || !_isConnected || _connectedDevice != device) {
+              if (_statusProbeCancelled ||
+                  !_isConnected ||
+                  _connectedDevice != device) {
                 log('专项测试已停止或连接断开');
                 return '测试已停止或设备断开';
               }
@@ -1619,34 +1744,55 @@ class BleService extends ChangeNotifier {
   void _startLvbuReadOnlyPolling(BluetoothDevice device) {
     _lvbuPoller?.stop();
     if (!LvbuProtocol.validImei(LvbuProtocol.motorImei)) {
-      _addLog(FrameLog(time: DateTime.now(), outgoing: false, data: const [],
+      _addLog(FrameLog(
+          time: DateTime.now(),
+          outgoing: false,
+          data: const [],
           source: '未配置有效的电机 IMEI，LVBU 查询已停用；请检查本地构建配置'));
       return;
     }
     _lvbuPoller = LvbuReadOnlyPoller(
-      canRequest: () => _isConnected && _connectedDevice == device &&
-          !_lvbuProbeRunning && !_manualWriteRunning && !_statusProbeRunning,
+      canRequest: () =>
+          _isConnected &&
+          _connectedDevice == device &&
+          !_lvbuProbeRunning &&
+          !_manualWriteRunning &&
+          !_assistPriorityWrite &&
+          !_statusProbeRunning,
       request: (command) => _requestLvbuRead(device, command),
       onReply: _applyLvbuReply,
       onFailure: (command, error) {
-        if (!_isConnected || _connectedDevice != device || !_lvbuFailures.add(command)) return;
-        _addLog(FrameLog(time: DateTime.now(), outgoing: false, data: const [],
-            source: '${command.code} 只读查询未确认${error is int ? "（状态 $error）" : ""}'));
+        if (!_isConnected ||
+            _connectedDevice != device ||
+            !_lvbuFailures.add(command)) {
+          return;
+        }
+        _addLog(FrameLog(
+            time: DateTime.now(),
+            outgoing: false,
+            data: const [],
+            source:
+                '${command.code} 只读查询未确认${error is int ? "（状态 $error）" : ""}'));
       },
     )..start();
     _lvbuVoltageTimer?.cancel();
     _lvbuVoltageTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-      if (!_isConnected || _connectedDevice != device || _manualWriteRunning) return;
+      if (!_isConnected || _connectedDevice != device || _manualWriteRunning) {
+        return;
+      }
       final now = DateTime.now();
       bool stale(LvbuReadCommand command, Duration limit) {
         final last = _lvbuLastSuccess[command];
         return last != null && now.difference(last) > limit;
       }
+
       var changed = false;
       if (stale(LvbuReadCommand.voltage, _lvbuVoltageFreshness)) {
         _lvbuLastSuccess.remove(LvbuReadCommand.voltage);
         _bikeData.voltage = 0;
-        if (_bikeData.batteryLevelEstimated) _bikeData.batteryLevelAvailable = false;
+        if (_bikeData.batteryLevelEstimated) {
+          _bikeData.batteryLevelAvailable = false;
+        }
         changed = true;
       }
       if (stale(LvbuReadCommand.speed, const Duration(seconds: 15))) {
@@ -1654,18 +1800,26 @@ class BleService extends ChangeNotifier {
         _bikeData.speedAvailable = false;
         changed = true;
       }
-      for (final command in [LvbuReadCommand.temperature, LvbuReadCommand.trip,
-          LvbuReadCommand.gyro, LvbuReadCommand.climbing]) {
+      for (final command in [
+        LvbuReadCommand.temperature,
+        LvbuReadCommand.trip,
+        LvbuReadCommand.gyro,
+        LvbuReadCommand.climbing
+      ]) {
         if (!stale(command, const Duration(seconds: 75))) continue;
         _lvbuLastSuccess.remove(command);
         switch (command) {
-          case LvbuReadCommand.temperature: _bikeData.temperatureAvailable = false;
-          case LvbuReadCommand.trip: _bikeData.tripAvailable = false;
-          case LvbuReadCommand.gyro: _bikeData.gyroAngleAvailable = false;
+          case LvbuReadCommand.temperature:
+            _bikeData.temperatureAvailable = false;
+          case LvbuReadCommand.trip:
+            _bikeData.tripAvailable = false;
+          case LvbuReadCommand.gyro:
+            _bikeData.gyroAngleAvailable = false;
           case LvbuReadCommand.climbing:
             _bikeData.climbingAngle = null;
             _bikeData.climbingLevel = null;
-          default: break;
+          default:
+            break;
         }
         changed = true;
       }
@@ -1673,13 +1827,26 @@ class BleService extends ChangeNotifier {
     });
   }
 
-  Future<LvbuReadReply?> _requestLvbuRead(BluetoothDevice device, LvbuReadCommand command) async {
-    if (_lvbuProbeRunning || _manualWriteRunning || _statusProbeRunning || !_isConnected || _connectedDevice != device) return null;
-    BluetoothCharacteristic? target;
-    for (final c in _mainService?.characteristics ?? const <BluetoothCharacteristic>[]) {
-      if (UuidUtil.normalize(c.characteristicUuid) == 'ffe1') { target = c; break; }
+  Future<LvbuReadReply?> _requestLvbuRead(
+      BluetoothDevice device, LvbuReadCommand command) async {
+    if (_lvbuProbeRunning ||
+        _manualWriteRunning ||
+        _assistPriorityWrite ||
+        _statusProbeRunning ||
+        !_isConnected ||
+        _connectedDevice != device) {
+      return null;
     }
-    if (target == null || !(target.properties.write || target.properties.writeWithoutResponse) ||
+    BluetoothCharacteristic? target;
+    for (final c
+        in _mainService?.characteristics ?? const <BluetoothCharacteristic>[]) {
+      if (UuidUtil.normalize(c.characteristicUuid) == 'ffe1') {
+        target = c;
+        break;
+      }
+    }
+    if (target == null ||
+        !(target.properties.write || target.properties.writeWithoutResponse) ||
         !(target.properties.notify || target.properties.indicate)) {
       return null;
     }
@@ -1703,10 +1870,14 @@ class BleService extends ChangeNotifier {
           withoutResponse: target.properties.writeWithoutResponse);
       try {
         final value = await reply.future.timeout(const Duration(seconds: 5));
-        return !_disposed && _isConnected && _connectedDevice == device ? value : null;
+        return !_disposed && _isConnected && _connectedDevice == device
+            ? value
+            : null;
       } on TimeoutException {
         // 留出迟到回包隔离时间，且仅在整条帧完成后才允许下一次请求。
-        try { await reply.future.timeout(const Duration(seconds: 2)); } on TimeoutException { /* 无迟到回复 */ }
+        try {
+          await reply.future.timeout(const Duration(seconds: 2));
+        } on TimeoutException {/* 无迟到回复 */}
         return null;
       }
     } finally {
@@ -1714,7 +1885,8 @@ class BleService extends ChangeNotifier {
       _lvbuProbeRunning = false;
       _lvbuReplyGuardTimer?.cancel();
       if (!_disposed && _isConnected && _connectedDevice == device) {
-        _lvbuReplyGuardTimer = Timer(const Duration(seconds: 10), () => _lvbuReplyGuard = false);
+        _lvbuReplyGuardTimer =
+            Timer(const Duration(seconds: 10), () => _lvbuReplyGuard = false);
       } else {
         _lvbuReplyGuard = false;
       }
@@ -1726,14 +1898,19 @@ class BleService extends ChangeNotifier {
     final recovered = _lvbuFailures.remove(reply.command);
     _lvbuLastSuccess[reply.command] = DateTime.now();
     if (first || recovered) {
-      _addLog(FrameLog(time: DateTime.now(), outgoing: false, data: const [],
+      _addLog(FrameLog(
+          time: DateTime.now(),
+          outgoing: false,
+          data: const [],
           source: '${reply.command.code} 只读查询收到有效回复（设备标识已隐藏）'));
     }
     switch (reply.command) {
       case LvbuReadCommand.voltage:
         _bikeData.voltage = reply.value!;
-        if (!_bikeData.batteryLevelAvailable || _bikeData.batteryLevelEstimated) {
-          _bikeData.batteryLevel = LvbuReadOnly.estimateBatteryPercent(reply.value!);
+        if (!_bikeData.batteryLevelAvailable ||
+            _bikeData.batteryLevelEstimated) {
+          _bikeData.batteryLevel =
+              LvbuReadOnly.estimateBatteryPercent(reply.value!);
           _bikeData.batteryLevelAvailable = true;
           _bikeData.batteryLevelEstimated = true;
         }
@@ -1748,7 +1925,8 @@ class BleService extends ChangeNotifier {
         _bikeData.rideTime = reply.tripTimeSeconds!;
         _bikeData.maxSpeed = reply.tripMaxSpeed!;
         _bikeData.avgSpeed = reply.tripTimeSeconds! > 0
-            ? reply.tripDistanceKm! * 3600 / reply.tripTimeSeconds! : 0;
+            ? reply.tripDistanceKm! * 3600 / reply.tripTimeSeconds!
+            : 0;
         _bikeData.tripAvailable = true;
       case LvbuReadCommand.gyro:
         _bikeData.slope = reply.value!;
@@ -1758,19 +1936,53 @@ class BleService extends ChangeNotifier {
         _bikeData.climbingLevel = reply.climbingLevel;
     }
     notifyListeners();
+    _maybeSyncManualMode();
+  }
+
+  /// 连上设备后，等电量与码表速度都读到，再下发一次「手动模式」。
+  ///
+  /// 设备侧没有离线模式查询，只能靠主动下发来对齐；原厂也只在手动模式下
+  /// 才接受 A5 助力指令，因此连接完成后先把设备切到手动更稳妥。
+  void _maybeSyncManualMode() {
+    if (!_manualModeSyncPending) return;
+    final batteryReady = _bikeData.batteryLevelAvailable || _bikeData.voltage > 0;
+    final speedReady = _bikeData.speedAvailable;
+    if (!batteryReady || !speedReady) return;
+    _manualModeSyncPending = false;
+    unawaited(_syncManualModeOnce());
+  }
+
+  /// 下发一次手动模式并记录结果；失败不重试，界面会显示「未确认」。
+  Future<void> _syncManualModeOnce() async {
+    _addLog(FrameLog(
+        time: DateTime.now(),
+        outgoing: false,
+        data: const [],
+        source: '已读到电量与速度，下发一次手动模式同步'));
+    final result = await setAssistMode(AssistMode.manual, priority: true);
+    _addLog(FrameLog(
+        time: DateTime.now(),
+        outgoing: false,
+        data: const [],
+        source: '手动模式同步结果：${result.name}'));
   }
 
   Future<String> queryLvbuVoltage({bool silent = false}) async {
     final device = _connectedDevice;
     if (!_isConnected || device == null) return '请先连接设备';
-    if (!LvbuProtocol.validImei(LvbuProtocol.motorImei)) return '未配置有效的电机 IMEI，请检查本地构建配置';
+    if (!LvbuProtocol.validImei(LvbuProtocol.motorImei)) {
+      return '未配置有效的电机 IMEI，请检查本地构建配置';
+    }
     if (_lvbuProbeRunning || _statusProbeRunning) return '正在读取其他数据，请稍后再试';
     try {
       final reply = await _requestLvbuRead(device, LvbuReadCommand.voltage);
       if (reply == null || reply.status != 1) return '电压查询未收到有效回复';
       _applyLvbuReply(reply);
       if (!silent) {
-        _addLog(FrameLog(time: DateTime.now(), outgoing: false, data: const [],
+        _addLog(FrameLog(
+            time: DateTime.now(),
+            outgoing: false,
+            data: const [],
             source: 'C0 电压: ${reply.value!.toStringAsFixed(1)} V（IMEI 已隐藏）'));
       }
       return '收到电压 ${reply.value!.toStringAsFixed(1)} V';
@@ -1783,31 +1995,47 @@ class BleService extends ChangeNotifier {
   Future<String?> runReadOnlyDiagnostic() async {
     final device = _connectedDevice;
     final target = _writeChar;
-    if (!_isConnected || device == null || target == null) return '设备未连接或没有可写通道';
+    if (!_isConnected || device == null || target == null) {
+      return '设备未连接或没有可写通道';
+    }
 
     final mtu = device.mtuNow.clamp(23, 517);
-    final noResponse = !target.properties.write && target.properties.writeWithoutResponse;
+    final noResponse =
+        !target.properties.write && target.properties.writeWithoutResponse;
     if (!target.properties.write && !noResponse) return '当前特征不支持写入';
     final label = UuidUtil.normalize(target.characteristicUuid);
     final frame = WePowerProtocol.inquireCommand(['34']);
     final chunks = WePowerProtocol.splitForMtu(frame, mtu);
-    _addLog(FrameLog(time: DateTime.now(), outgoing: false, data: const [],
+    _addLog(FrameLog(
+        time: DateTime.now(),
+        outgoing: false,
+        data: const [],
         source: '实验性只读查询: key=34，写=$label，MTU=$mtu；回复通道和格式均待验证'));
     try {
       for (var i = 0; i < chunks.length; i++) {
         if (!_isConnected || _connectedDevice != device) return '连接已断开，诊断中止';
         await target.write(chunks[i], withoutResponse: noResponse);
-        _addLog(FrameLog(time: DateTime.now(), outgoing: true, data: chunks[i],
-            source: '只读查询[$label ${i + 1}/${chunks.length}${noResponse ? "/无应答" : "/有应答"}]'));
+        _addLog(FrameLog(
+            time: DateTime.now(),
+            outgoing: true,
+            data: chunks[i],
+            source:
+                '只读查询[$label ${i + 1}/${chunks.length}${noResponse ? "/无应答" : "/有应答"}]'));
         if (i + 1 < chunks.length) {
           await Future<void>.delayed(const Duration(milliseconds: 100));
         }
       }
-      _addLog(FrameLog(time: DateTime.now(), outgoing: false, data: const [],
+      _addLog(FrameLog(
+          time: DateTime.now(),
+          outgoing: false,
+          data: const [],
           source: '查询写入已提交，不代表设备已接收或执行；请等待原始通知'));
       return null;
     } catch (e) {
-      _addLog(FrameLog(time: DateTime.now(), outgoing: false, data: const [],
+      _addLog(FrameLog(
+          time: DateTime.now(),
+          outgoing: false,
+          data: const [],
           source: '只读查询写入失败: $e'));
       return '查询写入失败: $e';
     }
@@ -1847,7 +2075,10 @@ class BleService extends ChangeNotifier {
       return CommandResult.notConnected;
     }
     // AA 55 控制协议来自错误的原厂包，禁止向车辆发送猜测的控制指令。
-    _addLog(FrameLog(time: DateTime.now(), outgoing: false, data: const [],
+    _addLog(FrameLog(
+        time: DateTime.now(),
+        outgoing: false,
+        data: const [],
         source: '$source：旧控制协议已停用，正确原厂协议尚待实机验证'));
     return CommandResult.writeFailed;
   }
@@ -1863,7 +2094,8 @@ class BleService extends ChangeNotifier {
 
     final payload =
         frame.length > 5 ? frame.sublist(4, frame.length - 1) : const <int>[];
-    final success = payload.isEmpty || payload.first == 0x00 || payload.first == 0x01;
+    final success =
+        payload.isEmpty || payload.first == 0x00 || payload.first == 0x01;
     debugPrint('收到回包 cmd=0x${cmd.toRadixString(16)} success=$success');
     completer.complete(success);
   }
@@ -1876,7 +2108,8 @@ class BleService extends ChangeNotifier {
   Future<CommandResult> setTireSize(double inches) async {
     final result = await sendCommandAwait(
       BleCommands.tireSize(inches),
-      source: '轮胎尺寸 ${inches == inches.roundToDouble() ? inches.toStringAsFixed(0) : inches}″',
+      source:
+          '轮胎尺寸 ${inches == inches.roundToDouble() ? inches.toStringAsFixed(0) : inches}″',
     );
     if (result.isOk) {
       _deviceSettings.tireSize = inches;
@@ -1894,12 +2127,16 @@ class BleService extends ChangeNotifier {
   Future<CommandResult> calibrateGyro() async {
     final device = _connectedDevice;
     if (!_isConnected || device == null) return CommandResult.notConnected;
-    if (_manualWriteRunning || _lvbuProbeRunning || _statusProbeRunning) return CommandResult.busy;
+    if (_manualWriteRunning || _lvbuProbeRunning || _statusProbeRunning) {
+      return CommandResult.busy;
+    }
     BluetoothCharacteristic? target;
-    for (final c in _mainService?.characteristics ?? const <BluetoothCharacteristic>[]) {
+    for (final c
+        in _mainService?.characteristics ?? const <BluetoothCharacteristic>[]) {
       if (UuidUtil.normalize(c.characteristicUuid) == 'ffe1') target = c;
     }
-    if (target == null || !(target.properties.write || target.properties.writeWithoutResponse) ||
+    if (target == null ||
+        !(target.properties.write || target.properties.writeWithoutResponse) ||
         !(target.properties.notify || target.properties.indicate)) {
       return CommandResult.writeFailed;
     }
@@ -1911,7 +2148,8 @@ class BleService extends ChangeNotifier {
       buffer += LvbuProtocol.toHex(data);
       final index = buffer.indexOf(prefix);
       if (index >= 0 && buffer.length >= index + 20 && !reply.isCompleted) {
-        reply.complete(int.parse(buffer.substring(index + 18, index + 20), radix: 16));
+        reply.complete(
+            int.parse(buffer.substring(index + 18, index + 20), radix: 16));
       } else if (index < 0 && buffer.length > prefix.length) {
         buffer = buffer.substring(buffer.length - prefix.length);
       }
@@ -1919,14 +2157,27 @@ class BleService extends ChangeNotifier {
     var started = false;
     try {
       await target.setNotifyValue(true);
-      if (!_isConnected || _connectedDevice != device) return CommandResult.notConnected;
+      if (!_isConnected || _connectedDevice != device) {
+        return CommandResult.notConnected;
+      }
       _lvbuReplyGuard = true;
       started = true;
-      _addLog(FrameLog(time: DateTime.now(), outgoing: true, data: const [], source: 'BE 陀螺仪校准（设备标识已隐藏）'));
-      await target.write(LvbuProtocol.gyroCalibration(LvbuProtocol.motorImei), withoutResponse: target.properties.writeWithoutResponse);
+      _addLog(FrameLog(
+          time: DateTime.now(),
+          outgoing: true,
+          data: const [],
+          source: 'BE 陀螺仪校准（设备标识已隐藏）'));
+      await target.write(LvbuProtocol.gyroCalibration(LvbuProtocol.motorImei),
+          withoutResponse: target.properties.writeWithoutResponse);
       final status = await reply.future.timeout(const Duration(seconds: 5));
-      if (!_isConnected || _connectedDevice != device || _disposed) return CommandResult.noResponse;
-      _addLog(FrameLog(time: DateTime.now(), outgoing: false, data: const [], source: status == 1 ? 'BE 校准收到确认' : 'BE 校准设备返回失败'));
+      if (!_isConnected || _connectedDevice != device || _disposed) {
+        return CommandResult.noResponse;
+      }
+      _addLog(FrameLog(
+          time: DateTime.now(),
+          outgoing: false,
+          data: const [],
+          source: status == 1 ? 'BE 校准收到确认' : 'BE 校准设备返回失败'));
       return status == 1 ? CommandResult.ok : CommandResult.deviceError;
     } on TimeoutException {
       return CommandResult.noResponse;
@@ -1934,11 +2185,14 @@ class BleService extends ChangeNotifier {
       return started ? CommandResult.noResponse : CommandResult.writeFailed;
     } finally {
       await sub.cancel();
-      if (started && _isConnected && _connectedDevice == device) await Future<void>.delayed(const Duration(seconds: 5));
+      if (started && _isConnected && _connectedDevice == device) {
+        await Future<void>.delayed(const Duration(seconds: 5));
+      }
       _manualWriteRunning = false;
       _lvbuReplyGuardTimer?.cancel();
       if (!_disposed && _isConnected && _connectedDevice == device) {
-        _lvbuReplyGuardTimer = Timer(const Duration(seconds: 10), () => _lvbuReplyGuard = false);
+        _lvbuReplyGuardTimer =
+            Timer(const Duration(seconds: 10), () => _lvbuReplyGuard = false);
       } else {
         _lvbuReplyGuard = false;
       }
@@ -1950,16 +2204,27 @@ class BleService extends ChangeNotifier {
   Future<CommandResult> restartLvbuDevice() async {
     final device = _connectedDevice;
     if (!_isConnected || device == null) return CommandResult.notConnected;
-    if (_manualWriteRunning || _lvbuProbeRunning || _statusProbeRunning) return CommandResult.busy;
+    if (_manualWriteRunning || _lvbuProbeRunning || _statusProbeRunning) {
+      return CommandResult.busy;
+    }
     BluetoothCharacteristic? target;
-    for (final c in _mainService?.characteristics ?? const <BluetoothCharacteristic>[]) {
+    for (final c
+        in _mainService?.characteristics ?? const <BluetoothCharacteristic>[]) {
       if (UuidUtil.normalize(c.characteristicUuid) == 'ffe2') target = c;
     }
-    if (target == null || !(target.properties.write || target.properties.writeWithoutResponse)) return CommandResult.writeFailed;
+    if (target == null ||
+        !(target.properties.write || target.properties.writeWithoutResponse)) {
+      return CommandResult.writeFailed;
+    }
     _manualWriteRunning = true;
     try {
-      _addLog(FrameLog(time: DateTime.now(), outgoing: true, data: const [0x33], source: 'FFE2 重启请求'));
-      await target.write(const [0x33], withoutResponse: !target.properties.write);
+      _addLog(FrameLog(
+          time: DateTime.now(),
+          outgoing: true,
+          data: const [0x33],
+          source: 'FFE2 重启请求'));
+      await target
+          .write(const [0x33], withoutResponse: !target.properties.write);
       return CommandResult.noResponse;
     } catch (_) {
       return CommandResult.writeFailed;
@@ -1993,23 +2258,40 @@ class BleService extends ChangeNotifier {
 
   /// 原厂 C4 模式设置；仅状态 01 且返回模式与请求一致才标记已确认。
   /// 无独立蓝牙模式查询；断线或未确认时状态为未知。
-  Future<CommandResult> setAssistMode(AssistMode mode) async {
-    if (_adapterState == BluetoothAdapterState.off) return CommandResult.bluetoothOff;
+  ///
+  /// [priority] 为 true 时按「安全动作」处理：跳过冷却与「结果不确定」封锁，
+  /// 链路忙时等待其空闲后再发（停止助力的兜底恢复会用到）。
+  Future<CommandResult> setAssistMode(AssistMode mode,
+      {bool priority = false}) async {
+    if (_adapterState == BluetoothAdapterState.off) {
+      return CommandResult.bluetoothOff;
+    }
     final device = _connectedDevice;
     if (!_isConnected || device == null) return CommandResult.notConnected;
-    if (_modeOutcomeUncertain) return CommandResult.modeUncertain;
-    if (_lvbuProbeRunning || _manualWriteRunning || _statusProbeRunning ||
-        (_modeRetryAfter != null && DateTime.now().isBefore(_modeRetryAfter!))) {
+    if (!priority && _modeOutcomeUncertain) return CommandResult.modeUncertain;
+    if (priority) {
+      _assistPriorityWrite = true;
+      if (!await _awaitLinkIdle()) {
+        _assistPriorityWrite = false;
+        return CommandResult.busy;
+      }
+    } else if (_lvbuProbeRunning ||
+        _manualWriteRunning ||
+        _statusProbeRunning ||
+        (_modeRetryAfter != null &&
+            DateTime.now().isBefore(_modeRetryAfter!))) {
       return CommandResult.busy;
     }
     BluetoothCharacteristic? target;
-    for (final c in _mainService?.characteristics ?? const <BluetoothCharacteristic>[]) {
+    for (final c
+        in _mainService?.characteristics ?? const <BluetoothCharacteristic>[]) {
       if (UuidUtil.normalize(c.characteristicUuid) == 'ffe1') {
         target = c;
         break;
       }
     }
-    if (target == null || !(target.properties.write || target.properties.writeWithoutResponse) ||
+    if (target == null ||
+        !(target.properties.write || target.properties.writeWithoutResponse) ||
         !(target.properties.notify || target.properties.indicate)) {
       return CommandResult.writeFailed;
     }
@@ -2032,13 +2314,18 @@ class BleService extends ChangeNotifier {
     try {
       await FlutterBluePlus.setLogLevel(LogLevel.none);
       await target.setNotifyValue(true);
-      if (_disposed || !_isConnected || _connectedDevice != device) return CommandResult.notConnected;
+      if (_disposed || !_isConnected || _connectedDevice != device) {
+        return CommandResult.notConnected;
+      }
       _lvbuReplyGuard = true;
       writeStarted = true;
       _modeWriteStarted = true;
       // 同一 C4 命令无事务 ID，冷却不能完全排除迟到回复。
       _modeRetryAfter = DateTime.now().add(const Duration(seconds: 5));
-      _addLog(FrameLog(time: DateTime.now(), outgoing: true, data: const [],
+      _addLog(FrameLog(
+          time: DateTime.now(),
+          outgoing: true,
+          data: const [],
           source: 'C4 设置模式 ${mode.label}（设备标识已隐藏）'));
       await target.write(LvbuModeCommand.set(mode, LvbuProtocol.motorImei),
           withoutResponse: target.properties.writeWithoutResponse);
@@ -2051,23 +2338,34 @@ class BleService extends ChangeNotifier {
       if (result.status != 1 || result.mode != mode) {
         _assistModeConfirmed = false;
         _modeOutcomeUncertain = true;
-        _addLog(FrameLog(time: DateTime.now(), outgoing: false, data: const [],
+        _addLog(FrameLog(
+            time: DateTime.now(),
+            outgoing: false,
+            data: const [],
             source: 'C4 回复失败或模式不一致，当前模式未知'));
         return CommandResult.deviceError;
       }
       _assistMode = mode;
       _assistModeConfirmed = true;
       _cachedAssistMode = mode;
-      try { await _rememberedStore.saveMode(device.remoteId.str, mode); } catch (_) {}
+      try {
+        await _rememberedStore.saveMode(device.remoteId.str, mode);
+      } catch (_) {}
       _assistPercentConfirmed = false;
       _modeOutcomeUncertain = false;
-      _addLog(FrameLog(time: DateTime.now(), outgoing: false, data: const [],
+      _addLog(FrameLog(
+          time: DateTime.now(),
+          outgoing: false,
+          data: const [],
           source: 'C4 收到设备确认：${mode.label}'));
       return CommandResult.ok;
     } on TimeoutException {
       _assistModeConfirmed = false;
       _modeOutcomeUncertain = true;
-      _addLog(FrameLog(time: DateTime.now(), outgoing: false, data: const [],
+      _addLog(FrameLog(
+          time: DateTime.now(),
+          outgoing: false,
+          data: const [],
           source: 'C4 未收到确认，设备可能已执行；请勿连续重试'));
       return CommandResult.noResponse;
     } catch (_) {
@@ -2075,35 +2373,75 @@ class BleService extends ChangeNotifier {
         _assistModeConfirmed = false;
         _modeOutcomeUncertain = true;
       }
-      _addLog(FrameLog(time: DateTime.now(), outgoing: false, data: const [],
+      _addLog(FrameLog(
+          time: DateTime.now(),
+          outgoing: false,
+          data: const [],
           source: 'C4 蓝牙写入失败或结果不确定'));
-      return writeStarted ? CommandResult.noResponse : CommandResult.writeFailed;
+      return writeStarted
+          ? CommandResult.noResponse
+          : CommandResult.writeFailed;
     } finally {
       await subscription.cancel();
-      // 迟到回复不作为后续设置的确认；等待后才恢复只读轮询。
-      if (writeStarted && _isConnected && _connectedDevice == device) {
-        await Future<void>.delayed(const Duration(seconds: 5));
-      }
+      // 先释放写锁，再等待迟到回复隔离期，避免把链路长时间堵死。
       _manualWriteRunning = false;
       _modeWriteRunning = false;
       _modeWriteStarted = false;
+      _assistPriorityWrite = false;
       _lvbuReplyGuardTimer?.cancel();
       if (!_disposed && _isConnected && _connectedDevice == device) {
-        _lvbuReplyGuardTimer = Timer(const Duration(seconds: 10), () => _lvbuReplyGuard = false);
+        _lvbuReplyGuardTimer =
+            Timer(const Duration(seconds: 10), () => _lvbuReplyGuard = false);
       } else {
         _lvbuReplyGuard = false;
       }
       if (!_disposed) notifyListeners();
+      if (writeStarted && _isConnected && _connectedDevice == device) {
+        await Future<void>.delayed(const Duration(milliseconds: 800));
+      }
     }
   }
 
-  /// 停止助力
+  /// 等待链路空闲：只读查询或上一次写入结束后才算空闲。
+  Future<bool> _awaitLinkIdle() async {
+    final deadline = DateTime.now().add(_priorityWaitBudget);
+    while (_lvbuProbeRunning ||
+        _manualWriteRunning ||
+        _statusProbeRunning) {
+      if (!DateTime.now().isBefore(deadline)) return false;
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    }
+    return true;
+  }
+
+  /// 停止助力。
+  ///
+  /// 原厂 LVBU 3.4.0 全量命令表里**没有独立的「停止助力」命令字**：
+  /// 桌面小组件的「停止」（`WindowWidgetProvider.clickStopHelp` → `setHelpProgress(0)`）
+  /// 与主 App 里把滑杆拖到 0，走的都是同一条 A5 手动助力通道 ——
+  /// `A5F<电机IMEI>00`，即把手动助力百分比设为 0。
+  /// 旧版 `BleCommands.assistStop()` 的 AA55 / 0x22 帧来自误用的 APK 推测，
+  /// `sendCommandAwait` 已整体停用（只返回 writeFailed），不能再用于实车。
+  ///
+  /// 停止属于安全动作：按 [setAssistPercent] 的 priority 通道发送，
+  /// 会跳过冷却、抢占只读轮询，并在链路忙时等待后重发。
+  ///
+  /// 原厂只在「手动模式」下才发送 A5，所以设备侧模式不是手动（或未确认）时，
+  /// 先下发一次手动模式再发 0%；界面上的模式按钮与状态文案同步跟随。
   Future<CommandResult> stopAssist() async {
-    final result =
-        await sendCommandAwait(BleCommands.assistStop(), source: '停止助力');
+    var modeReady = _assistMode == AssistMode.manual && _assistModeConfirmed;
+    if (!modeReady) {
+      final mode = await setAssistMode(AssistMode.manual, priority: true);
+      modeReady = mode.isOk;
+    }
+    var result = await setAssistPercent(0, priority: true);
+    if (result == CommandResult.deviceError && !modeReady) {
+      // 设备拒绝了 0%（多半不在手动模式）：再切一次手动后重发。
+      final mode = await setAssistMode(AssistMode.manual, priority: true);
+      if (mode.isOk) result = await setAssistPercent(0, priority: true);
+    }
     if (result.isOk) {
       _assistLevel = 0;
-      _assistPercent = 0;
       _bikeData.assistLevel = 0;
       notifyListeners();
     }
@@ -2111,25 +2449,60 @@ class BleService extends ChangeNotifier {
   }
 
   /// 手动模式 A5：发送一次，只有状态和返回值都匹配才确认。
-  Future<CommandResult> setAssistPercent(int percent) async {
-    if (_adapterState == BluetoothAdapterState.off) return CommandResult.bluetoothOff;
+  ///
+  /// [priority] 为 true 时按「安全动作」处理（停止助力、停止后恢复原助力）：
+  /// - 跳过 1.5 秒写入冷却与「上次结果不确定」的封锁；
+  /// - 期间暂停只读轮询，避免只读查询抢占链路；
+  /// - 链路正忙（只读查询或上一次写入）时等待其结束再发送，
+  ///   最多等 [_priorityWaitBudget]，而不是直接放弃。
+  Future<CommandResult> setAssistPercent(int percent,
+      {bool priority = false}) async {
+    if (_adapterState == BluetoothAdapterState.off) {
+      return CommandResult.bluetoothOff;
+    }
     final device = _connectedDevice;
     if (!_isConnected || device == null) return CommandResult.notConnected;
-    if (!_assistModeConfirmed || _assistMode != AssistMode.manual) return CommandResult.modeUncertain;
-    if (_modeOutcomeUncertain) return CommandResult.modeUncertain;
+    // 手动是本地默认模式：未收到 C4 设备确认也允许直接下发 A5，
+    // 免去每次连接都要先点一次「手动」。结果不确定时仍然禁止发送。
+    if (_assistMode != AssistMode.manual) return CommandResult.modeUncertain;
+    if (!priority && _modeOutcomeUncertain) return CommandResult.modeUncertain;
     if (percent < 0 || percent > 99) return CommandResult.writeFailed;
-    if (_lvbuProbeRunning || _manualWriteRunning || _statusProbeRunning ||
-        (_modeRetryAfter != null && DateTime.now().isBefore(_modeRetryAfter!))) {
+
+    if (priority) {
+      // 抢占链路：只读轮询在本次写入结束前不再发起新查询。
+      _assistPriorityWrite = true;
+      final deadline = DateTime.now().add(_priorityWaitBudget);
+      while (_lvbuProbeRunning ||
+          _manualWriteRunning ||
+          _statusProbeRunning) {
+        if (!DateTime.now().isBefore(deadline)) {
+          _assistPriorityWrite = false;
+          _addLog(FrameLog(
+              time: DateTime.now(),
+              outgoing: false,
+              data: const [],
+              source: '优先级指令等待链路空闲超时，本次未发送'));
+          return CommandResult.busy;
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+      }
+    } else if (_lvbuProbeRunning ||
+        _manualWriteRunning ||
+        _statusProbeRunning ||
+        (_assistWriteCooldownAt != null &&
+            DateTime.now().isBefore(_assistWriteCooldownAt!))) {
       return CommandResult.busy;
     }
     BluetoothCharacteristic? target;
-    for (final c in _mainService?.characteristics ?? const <BluetoothCharacteristic>[]) {
+    for (final c
+        in _mainService?.characteristics ?? const <BluetoothCharacteristic>[]) {
       if (UuidUtil.normalize(c.characteristicUuid) == 'ffe1') {
         target = c;
         break;
       }
     }
-    if (target == null || !(target.properties.write || target.properties.writeWithoutResponse) ||
+    if (target == null ||
+        !(target.properties.write || target.properties.writeWithoutResponse) ||
         !(target.properties.notify || target.properties.indicate)) {
       return CommandResult.writeFailed;
     }
@@ -2149,14 +2522,24 @@ class BleService extends ChangeNotifier {
     try {
       await FlutterBluePlus.setLogLevel(LogLevel.none);
       await target.setNotifyValue(true);
-      if (_disposed || !_isConnected || _connectedDevice != device) return CommandResult.notConnected;
+      if (_disposed || !_isConnected || _connectedDevice != device) {
+        return CommandResult.notConnected;
+      }
       _lvbuReplyGuard = true;
       writeStarted = true;
       _modeWriteStarted = true;
-      _modeRetryAfter = DateTime.now().add(const Duration(seconds: 5));
-      _addLog(FrameLog(time: DateTime.now(), outgoing: true, data: const [],
+      // A5 只做 1.5 秒冷却：既挡住连点狂刷，又不会把停止助力堵在门外。
+      // 注意：这 1.5 秒是软件自加的，原厂没有任何「写完要等几秒」的设备侧要求；
+      // 设备侧唯一的硬性要求是「同一条命令在途时不要发第二条」。
+      // 因此这里不再占用 _modeRetryAfter（那是 C4 模式设置的回包隔离窗口）。
+      _assistWriteCooldownAt = DateTime.now().add(_assistWriteCooldown);
+      _addLog(FrameLog(
+          time: DateTime.now(),
+          outgoing: true,
+          data: const [],
           source: 'A5 设置手动助力 $percent%（设备标识已隐藏）'));
-      await target.write(LvbuAssistPercentCommand.set(percent, LvbuProtocol.motorImei),
+      await target.write(
+          LvbuAssistPercentCommand.set(percent, LvbuProtocol.motorImei),
           withoutResponse: target.properties.writeWithoutResponse);
       final result = await reply.future.timeout(const Duration(seconds: 5));
       if (!_isConnected || _connectedDevice != device || _disposed) {
@@ -2166,20 +2549,35 @@ class BleService extends ChangeNotifier {
       }
       if (result.status != 1 || result.percent != percent) {
         _assistPercentConfirmed = false;
-        _modeOutcomeUncertain = true;
-        _addLog(FrameLog(time: DateTime.now(), outgoing: false, data: const [],
-            source: 'A5 回复失败或数值不一致，当前百分比未知'));
+        if (result.status == 1 && result.percent != null) {
+          // 设备回了成功但数值不同：以设备上报的数值为准。
+          _assistPercent = result.percent!;
+        }
+        // 设备明确拒绝（状态 02）时结果已知，不必封锁后续指令；
+        // 只有「没等到回复」才需要封锁。
+        if (result.status != 2) _modeOutcomeUncertain = true;
+        _addLog(FrameLog(
+            time: DateTime.now(),
+            outgoing: false,
+            data: const [],
+            source: 'A5 回复未生效（状态 ${result.status}，数值 ${result.percent ?? "--"}，期望 $percent%），当前百分比未知'));
         return CommandResult.deviceError;
       }
       _assistPercent = percent;
       _assistPercentConfirmed = true;
-      _addLog(FrameLog(time: DateTime.now(), outgoing: false, data: const [],
+      _addLog(FrameLog(
+          time: DateTime.now(),
+          outgoing: false,
+          data: const [],
           source: 'A5 收到设备确认：$percent%'));
       return CommandResult.ok;
     } on TimeoutException {
       _assistPercentConfirmed = false;
       _modeOutcomeUncertain = true;
-      _addLog(FrameLog(time: DateTime.now(), outgoing: false, data: const [],
+      _addLog(FrameLog(
+          time: DateTime.now(),
+          outgoing: false,
+          data: const [],
           source: 'A5 未收到确认，设备可能已执行；请勿连续重试'));
       return CommandResult.noResponse;
     } catch (_) {
@@ -2187,28 +2585,37 @@ class BleService extends ChangeNotifier {
         _assistPercentConfirmed = false;
         _modeOutcomeUncertain = true;
       }
-      return writeStarted ? CommandResult.noResponse : CommandResult.writeFailed;
+      return writeStarted
+          ? CommandResult.noResponse
+          : CommandResult.writeFailed;
     } finally {
       await subscription.cancel();
-      if (writeStarted && _isConnected && _connectedDevice == device) {
-        await Future<void>.delayed(const Duration(seconds: 5));
-      }
+      // 先释放写锁，再做短暂的稳定等待：等待期间不再占用链路，
+      // 后续指令（包括停止助力）可以立即排队发送。
       _manualWriteRunning = false;
       _modeWriteRunning = false;
       _modeWriteStarted = false;
+      _assistPriorityWrite = false;
       _lvbuReplyGuardTimer?.cancel();
       if (!_disposed && _isConnected && _connectedDevice == device) {
-        _lvbuReplyGuardTimer = Timer(const Duration(seconds: 10), () => _lvbuReplyGuard = false);
+        _lvbuReplyGuardTimer =
+            Timer(const Duration(seconds: 10), () => _lvbuReplyGuard = false);
       } else {
         _lvbuReplyGuard = false;
       }
       if (!_disposed) notifyListeners();
+      if (writeStarted && _isConnected && _connectedDevice == device) {
+        await Future<void>.delayed(const Duration(milliseconds: 800));
+      }
     }
   }
 
-  /// 手动模式下按步进调整百分比
+  /// 手动模式下按步进调整百分比。
+  ///
+  /// 与停止助力一样按「安全动作」处理：用户直接操作不应被写入冷却挡回去，
+  /// 链路忙时等待其空闲后照常下发。
   Future<CommandResult> stepAssistPercent(int delta) =>
-      setAssistPercent((_assistPercent + delta).clamp(0, 99));
+      setAssistPercent((_assistPercent + delta).clamp(0, 99), priority: true);
 
   /// 获取设备信号强度
   Future<int> getRssi() async {

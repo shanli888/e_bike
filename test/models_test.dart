@@ -1,3 +1,4 @@
+import 'package:bike_computer/models/assist_mode.dart';
 import 'package:bike_computer/models/bike_data.dart';
 import 'package:bike_computer/models/command_result.dart';
 import 'package:bike_computer/models/device_settings.dart';
@@ -63,10 +64,14 @@ void main() {
     });
   });
 
-  test('未连接时模式和百分比不会被当作设备已确认状态', () {
+  test('未连接时默认显示手动模式，但不会被当作设备已确认状态', () {
     final ble = BleService();
+    expect(ble.assistMode, AssistMode.manual);
     expect(ble.assistModeConfirmed, isFalse);
-    expect(ble.assistModeStatus, contains('未知'));
+    expect(ble.assistModeStatus, contains('手动'));
+    expect(ble.assistModeStatus, contains('默认'));
+    expect(ble.assistModeStatus, isNot(contains('已确认')));
+    expect(ble.assistPercentConfirmed, isFalse);
   });
 
   group('DeviceSettings', () {
@@ -88,6 +93,7 @@ void main() {
     test('只有确认和未回包算「已发出」', () {
       expect(CommandResult.ok.isSent, isTrue);
       expect(CommandResult.noResponse.isSent, isTrue);
+      expect(CommandResult.atLimit.isSent, isFalse);
       expect(CommandResult.writeFailed.isSent, isFalse);
       expect(CommandResult.busy.isSent, isFalse);
       expect(CommandResult.modeUncertain.isSent, isFalse);
@@ -107,6 +113,7 @@ void main() {
       expect(CommandResult.noResponse.isError, isFalse);
       expect(CommandResult.deviceError.isError, isFalse);
       expect(CommandResult.ok.isError, isFalse);
+      expect(CommandResult.atLimit.isError, isFalse);
     });
 
     test('每种结果都有标题和说明', () {
