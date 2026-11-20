@@ -30,7 +30,7 @@ class NeedleSpeedometer extends StatefulWidget {
   /// 速度来源：true=GPS，false=蓝牙（仅用于语义标签）。
   final bool useGps;
 
-  /// 表盘宽度，调用方按屏幕缩放后传入；高度按设计稿比例 184/200 自适应。
+  /// 表盘宽度，调用方按屏幕缩放后传入；高度按设计稿比例 179/200 自适应。
   final double size;
 
   static const double maxSpeed = 60;
@@ -124,7 +124,7 @@ class _NeedleSpeedometerState extends State<NeedleSpeedometer>
   @override
   Widget build(BuildContext context) {
     final w = widget.size;
-    final h = w * 184 / 200;
+    final h = w * 179 / 200;
     final fontFamily = DefaultTextStyle.of(context).style.fontFamily;
 
     final baseLabel = widget.speed == null
@@ -250,7 +250,7 @@ class _FanPainter extends CustomPainter {
   static const _roadFarY = 115.0;
   static const _roadNearY = 176.0;
   static const _roadFarHalf = 20.0;
-  static const _roadNearHalf = 96.0;
+  static const _roadNearHalf = 99.0;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -259,9 +259,6 @@ class _FanPainter extends CustomPainter {
     canvas.scale(scale);
 
     _drawRoad(canvas);
-    canvas.translate(_c.dx, _c.dy);
-    canvas.scale(0.90);
-    canvas.translate(-_c.dx, -_c.dy);
     _drawCase(canvas);
     _drawArc(canvas);
     _drawTicks(canvas);

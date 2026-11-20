@@ -224,7 +224,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
               opacity: showGauge ? 1 : 0,
               duration: const Duration(milliseconds: 260),
               child: Padding(
-                // 底部只留页指示点的空间，尽量把高度让给放大后的无框表盘。
                 padding: EdgeInsets.only(bottom: 10 * s),
                 child: Center(
                   child: FittedBox(
@@ -262,7 +261,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             Positioned(
               left: 0,
               right: 0,
-              bottom: 2 * s,
+              top: 8 * s,
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
