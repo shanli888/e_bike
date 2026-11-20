@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>指针仪表盘 · 码表首页概念稿</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles/tokens.css" />
+  <link rel="stylesheet" href="styles/base.css" />
+  <link rel="stylesheet" href="styles/components.css" />
+</head>
+<body>
+  <!-- 手机外的预览控件：切换表盘裁切方案 -->
+  <div class="preview-wrap">
+    <div class="preview-title">半圆 / 扇形表盘 · 效果预览</div>
+    <div class="variant-bar" role="group" aria-label="切换表盘方案">
+      <button type="button" data-variant="half180">半圆 180°</button>
+      <button type="button" data-variant="fan220" class="is-active">扇形 220°</button>
+      <button type="button" data-variant="fan260">扇形 260°</button>
+    </div>
+  </div>
+  <div class="phone" id="app">
+
+    <!-- ============ 状态栏 ============ -->
+    <div class="statusbar reveal" data-reveal="0">
+      <span class="statusbar__time">10:01</span>
+      <div class="statusbar__right">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h3v-6H4zm6.5 0h3V9h-3zm6.5 0h3V4h-3z" /></svg>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 18a2 2 0 100 4 2 2 0 000-4zm-6-6a8 8 0 0112 0m-9 3a4.5 4.5 0 016 0M3 9a12 12 0 0118 0" /></svg>
+        <span class="statusbar__battery"><i></i>94</span>
+      </div>
+    </div>
+
+    <!-- ============ 标题栏 ============ -->
+    <header class="topbar reveal" data-reveal="1">
+      <div class="topbar__left">
+        <svg class="ico-bt" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3l8 7-4 3-4-3zm0 0v18l8-8-8-5zm8 7l-8 5" /></svg>
+        <svg class="ico-signal" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18h3v-4H4zm5 0h3V9H9zm5 0h3V5h-3z" /></svg>
+        <span>未连接设备</span>
+      </div>
+      <button class="icon-btn" aria-label="设置">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 100-7 3.5 3.5 0 000 7z" /><path d="M19.4 15a1.7 1.7 0 00.34 1.88l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.7 1.7 0 00-1.88-.34 1.7 1.7 0 00-1.03 1.56V21a2 2 0 01-4 0v-.09A1.7 1.7 0 008.9 19.4a1.7 1.7 0 00-1.88.34l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.7 1.7 0 004.53 15a1.7 1.7 0 00-1.56-1.03H3a2 2 0 010-4h.09A1.7 1.7 0 004.6 8.9a1.7 1.7 0 00-.34-1.88l-.06-.06a2 2 0 012.83-2.83l.06.06A1.7 1.7 0 009 4.53a1.7 1.7 0 001.03-1.56V3a2 2 0 014 0v.09A1.7 1.7 0 0015.1 4.6a1.7 1.7 0 001.88-.34l.06-.06a2 2 0 012.83 2.83l-.06.06A1.7 1.7 0 0019.47 9v.09a1.7 1.7 0 001.56 1.03H21a2 2 0 010 4h-.09a1.7 1.7 0 00-1.51.88z" /></svg>
+      </button>
+    </header>
+
+    <main class="dash">
+
+      <!-- ============ 顶部骑行时间 ============ -->
+      <div class="ride-time reveal" data-reveal="2">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13" r="8" /><path d="M12 9v4l3 2M9 2h6" /></svg>
+        <span class="seg">01:24</span>
+      </div>
+
+      <!-- ============ 核心：三表联动仪表集群 ============ -->
+      <section class="cluster" aria-label="指针仪表盘">
+
+        <!-- 主速度指针表 -->
+        <div class="gauge speedo speedo--main reveal" data-reveal="4">
+          <div class="gauge__caption gauge__caption--main">
+            <svg class="ico-bt" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3l8 7-4 3-4-3zm0 0v18l8-8-8-5zm8 7l-8 5" /></svg>
+            主速度 · 蓝牙
+          </div>
+          <div class="speedo__dial">
+            <svg viewBox="0 0 200 150" role="img" aria-label="主速度指针仪表" id="semiGaugeSvg">
+              <defs>
+                <!-- 盘面：径向内凹，边缘压暗 -->
+                <radialGradient id="dialMain" cx="50%" cy="30%" r="78%">
+                  <stop offset="0%" stop-color="#1b2845" />
+                  <stop offset="58%" stop-color="#101a30" />
+                  <stop offset="100%" stop-color="#050a16" />
+                </radialGradient>
+                <!-- 指针：德系红针，根部深、尖端亮 -->
+                <linearGradient id="needleMainGrad" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0%" stop-color="#8f1018" />
+                  <stop offset="45%" stop-color="#ff2d38" />
+                  <stop offset="100%" stop-color="#ff6b6b" />
+                </linearGradient>
+                <linearGradient id="glassMain" x1="0" y1="0.28" x2="0.35" y2="1">
+                  <stop offset="0%" stop-color="#ffffff" stop-opacity="0.07" />
+                  <stop offset="38%" stop-color="#ffffff" stop-opacity="0.015" />
+                  <stop offset="100%" stop-color="#ffffff" stop-opacity="0" />
+                </linearGradient>
+                <linearGradient id="arcGradMain" x1="0" y1="1" x2="1" y2="0">
+                  <stop offset="0%" stop-color="#5a1218" />
+                  <stop offset="55%" stop-color="#d42a34" />
+                  <stop offset="100%" stop-color="#ff5b62" />
+                </linearGradient>
+                <filter id="glowMain" x="-60%" y="-60%" width="220%" height="220%">
+                  <feGaussianBlur stdDeviation="3.4" result="b" />
+                  <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+                </filter>
+                <filter id="glowMax" x="-60%" y="-60%" width="220%" height="220%">
+                  <feGaussianBlur stdDeviation="3" result="b" />
+                  <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+                </filter>
+                <!-- 透视道路：路面由远及近渐亮 -->
+                <linearGradient id="roadFill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="#0b1b34" stop-opacity="0" />
+                  <stop offset="45%" stop-color="#122a4a" stop-opacity="0.5" />
+                  <stop offset="100%" stop-color="#1b3a63" stop-opacity="0.78" />
+                </linearGradient>
+                <linearGradient id="roadEdgeGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="#4aa8ff" stop-opacity="0.04" />
+                  <stop offset="100%" stop-color="#82d0ff" stop-opacity="0.8" />
+                </linearGradient>
+              </defs>
+              <!-- 透视道路（扇形下方，营造在路上前进）→ 最底层 -->
+              <g id="semiRoad" class="road" aria-hidden="true">
+                <path id="roadSurface" class="road__surface" fill="url(#roadFill)" />
+                <path id="roadEdgeL" class="road__edge" stroke="url(#roadEdgeGrad)" />
+                <path id="roadEdgeR" class="road__edge" stroke="url(#roadEdgeGrad)" />
+                <path id="roadCenter" class="road__center" />
+                <g id="roadRungs"></g>
+              </g>
+              <!-- 无框盘面几何（盘面 / 内环）由脚本按扇形角度生成 -->
+              <g id="semiBezel"></g>
+              <path class="gauge-arc gauge-arc--track" id="semiTrack" />
+              <path class="gauge-arc gauge-arc--max" id="semiMaxArc" filter="url(#glowMax)" />
+              <path class="gauge-arc gauge-arc--active" id="semiArc" filter="url(#glowMain)" />
+              <g class="speedo__ticks" id="semiTicks" aria-hidden="true"></g>
+              <g class="speedo__markers" id="gaugeMarkers" aria-hidden="true"></g>
+              <g id="semiCenter" aria-hidden="true"></g>
+              <g class="needle needle--main" id="semiNeedle">
+                <path class="needle__tail" id="semiNeedleTail" />
+                <path class="needle__body" id="semiNeedleBody" />
+              </g>
+              <g id="semiHub"></g>
+              <path class="glass-glare" id="semiGlass" fill="url(#glassMain)" />
+            </svg>
+          </div>
+          <div class="speedo__foot"><span class="status-dot"></span> <span id="semiModeLabel">扇形 220°</span></div>
+        </div>
+      </section>
+
+      <!-- ============ AVG / MAX / km ============ -->
+      <section class="subtable reveal" data-reveal="6" aria-label="骑行统计">
+        <div class="subtable__col">
+          <span class="subtable__tag">AVG</span>
+          <span class="seg subtable__val">18.6</span>
+        </div>
+        <div class="subtable__col">
+          <span class="subtable__tag">MAX</span>
+          <span class="seg subtable__val">36.8</span>
+        </div>
+        <div class="subtable__col">
+          <span class="subtable__tag">km</span>
+          <span class="seg subtable__val">12.7</span>
+        </div>
+      </section>
+
+      <!-- ============ 助力控制 ============ -->
+      <section class="assist reveal" data-reveal="7" aria-label="助力控制">
+        <div class="assist__head">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5.5" cy="17" r="3.5" /><circle cx="18.5" cy="17" r="3.5" /><path d="M5.5 17L10 9l4 5 2-3 2.5 6M9 7h4" /></svg>
+          <strong>助力控制</strong>
+          <em id="assistPercent">45%</em>
+          <span class="assist__battery" aria-hidden="true"></span>
+        </div>
+        <div class="assist__modes" role="group" aria-label="助力模式">
+          <button type="button">通勤</button>
+          <button type="button">运动</button>
+          <button type="button">爬坡</button>
+          <button type="button">休闲</button>
+          <button type="button" class="is-active" aria-pressed="true">手动</button>
+        </div>
+        <div class="assist__control">
+          <button class="assist__step" type="button" aria-label="减少助力">−</button>
+          <div class="assist__slider" role="slider" aria-label="助力百分比" aria-valuemin="0" aria-valuemax="99" aria-valuenow="45" tabindex="0">
+            <div class="assist__slider-fill" id="sliderFill"></div>
+            <div class="assist__slider-thumb" id="sliderThumb"></div>
+          </div>
+          <button class="assist__step" type="button" aria-label="增加助力">+</button>
+        </div>
+      </section>
+
+      <!-- ============ 传感器 ============ -->
+      <section class="sensors reveal" data-reveal="8" aria-label="传感器状态">
+        <div class="sensor sensor--blue">
+          <div class="sensor__top"><span>电量 <b>56%</b></span></div>
+          <div class="sensor__bar"><i style="width:56%"></i></div>
+          <div class="sensor__value seg">37.6<span>V</span></div>
+        </div>
+        <div class="sensor sensor--green">
+          <div class="sensor__top"><span>温度 <b>正常</b></span></div>
+          <div class="sensor__bar"><i style="width:60%"></i></div>
+          <div class="sensor__value seg">22.6<span>℃</span></div>
+        </div>
+        <div class="sensor sensor--cyan">
+          <div class="sensor__top"><span>陀螺仪</span></div>
+          <div class="sensor__bar"><i style="width:50%;left:50%"></i></div>
+          <div class="sensor__value seg">3.2<span>°</span></div>
+        </div>
+      </section>
+
+      <div class="version reveal" data-reveal="9">演示数据 · v1.6.54 · 2026-11-16</div>
+    </main>
+
+    <!-- ============ 底部导航 ============ -->
+    <nav class="bottomnav reveal" data-reveal="10" aria-label="主导航">
+      <button type="button" class="is-active" aria-current="page">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17a8 8 0 0116 0M8 17l3-7h2l3 7" /><circle cx="12" cy="7" r="2" /></svg>
+        <span>码表</span>
+      </button>
+      <button type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3l8 7-4 3-4-3zm0 0v18l8-8-8-5zm8 7l-8 5" /></svg>
+        <span>设备</span>
+      </button>
+      <button type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 00.34 1.88l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.7 1.7 0 00-1.88-.34 1.7 1.7 0 00-1.03 1.56V21a2 2 0 01-4 0v-.09A1.7 1.7 0 008.9 19.4a1.7 1.7 0 00-1.88.34l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.7 1.7 0 004.53 15a1.7 1.7 0 00-1.56-1.03H3a2 2 0 010-4h.09A1.7 1.7 0 004.6 8.9a1.7 1.7 0 00-.34-1.88l-.06-.06a2 2 0 012.83-2.83l.06.06A1.7 1.7 0 009 4.53a1.7 1.7 0 001.03-1.56V3a2 2 0 014 0v.09A1.7 1.7 0 0015.1 4.6a1.7 1.7 0 001.88-.34l.06-.06a2 2 0 012.83 2.83l-.06.06A1.7 1.7 0 0019.47 9v.09a1.7 1.7 0 001.56 1.03H21a2 2 0 010 4h-.09a1.7 1.7 0 00-1.51.88z" /></svg>
+        <span>设置</span>
+      </button>
+    </nav>
+
+    <!-- ============ 轻提示 ============ -->
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  </div>
+
+  <script src="scripts/main.js"></script>
+</body>
+</html>

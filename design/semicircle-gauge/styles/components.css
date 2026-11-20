@@ -1,0 +1,898 @@
+/* ==========================================================================
+   组件层：状态栏 / 标题栏 / 三表集群 / 统计 / 助力 / 传感器 / 导航
+   ========================================================================== */
+
+/* ---------- 通用 SVG 图标 ---------- */
+svg[viewBox] {
+  display: block;
+}
+.statusbar svg,
+.topbar svg,
+.ride-time svg,
+.assist__head svg,
+.bottomnav svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ==========================================================================
+   状态栏
+   ========================================================================== */
+.statusbar {
+  flex: 0 0 34px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 22px;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.statusbar__time {
+  color: var(--color-text);
+}
+.statusbar__right {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--color-muted-2);
+}
+.statusbar__right svg {
+  width: 15px;
+  height: 15px;
+  stroke-width: 2;
+}
+.statusbar__battery {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 5px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 4px;
+  font-size: var(--fs-xs);
+  color: var(--color-text);
+}
+.statusbar__battery i {
+  width: 9px;
+  height: 5px;
+  border-radius: 1px;
+  background: var(--color-green);
+  box-shadow: var(--glow-green);
+}
+
+/* ==========================================================================
+   标题栏
+   ========================================================================== */
+.topbar {
+  flex: 0 0 50px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 18px;
+}
+.topbar__left {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: var(--fs-lg);
+  font-weight: 500;
+  color: var(--color-text);
+}
+.topbar .ico-bt {
+  width: 17px;
+  height: 17px;
+  color: var(--color-blue);
+  stroke-width: 2;
+  filter: drop-shadow(0 0 5px var(--gauge-glow-blue));
+}
+.topbar .ico-signal {
+  width: 15px;
+  height: 15px;
+  color: var(--color-muted);
+}
+.icon-btn {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--color-border-soft);
+  color: var(--color-muted-2);
+  transition: background var(--dur-fast), color var(--dur-fast), transform var(--dur-fast);
+}
+.icon-btn svg {
+  width: 18px;
+  height: 18px;
+}
+.icon-btn:hover {
+  background: rgba(74, 168, 255, 0.14);
+  color: var(--color-cyan);
+  transform: rotate(25deg);
+}
+
+/* ==========================================================================
+   内容区
+   ========================================================================== */
+.dash {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0 6px;
+  overflow: hidden;
+}
+
+/* ---------- 骑行时间 ---------- */
+.ride-time {
+  flex: 0 0 26px;
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 3px 10px 3px 8px;
+  border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid var(--color-border-soft);
+}
+.ride-time svg {
+  width: 13px;
+  height: 13px;
+  color: var(--color-muted);
+}
+.ride-time .seg {
+  font-family: var(--font-seg);
+  font-size: var(--fs-seg-top);
+  line-height: 1;
+  color: #d7e6fb;
+  text-shadow: 0 0 10px rgba(130, 190, 255, 0.35);
+  letter-spacing: 0.06em;
+}
+
+/* ==========================================================================
+   核心：三表联动仪表集群
+   ========================================================================== */
+/* 单表布局：主表居中放大，成为唯一的视觉焦点 */
+.cluster {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  margin-top: 2px;
+}
+
+.gauge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.gauge__caption {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.14em;
+  color: var(--color-muted);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.gauge__caption svg {
+  width: 11px;
+  height: 11px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.gauge__caption--main {
+  color: var(--color-cyan);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+.gauge__caption--main .ico-bt {
+  filter: drop-shadow(0 0 4px var(--gauge-glow-blue));
+}
+.gauge .ico-gps {
+  color: var(--color-green);
+}
+
+/* ---------- 表盘通用 ---------- */
+.speedo__dial,
+.compass__dial {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1;
+}
+.speedo__dial svg,
+.compass__dial svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+/* 主表盘尺寸：独占上行，半圆表盘宽扁，按宽度自适应高度 */
+.speedo--main {
+  gap: 5px;
+}
+.speedo--main .speedo__dial {
+  width: min(100%, 340px);
+  aspect-ratio: auto;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+.speedo--main .speedo__dial svg {
+  width: 100%;
+  height: auto;
+}
+
+/* ---------- 无框盘面：不做金属表壳，只保留内部层次 ---------- */
+.speedo__face,
+.compass__face {
+  stroke: rgba(150, 180, 230, 0.1);
+  stroke-width: 0.8;
+}
+.speedo--main .speedo__face {
+  stroke: none;
+}
+.speedo__inner-ring,
+.compass__inner {
+  fill: none;
+  stroke: rgba(150, 180, 230, 0.07);
+  stroke-width: 1;
+}
+.glass-glare {
+  pointer-events: none;
+  mix-blend-mode: screen;
+}
+
+/* 发光弧线轨道 */
+.gauge-arc {
+  fill: none;
+  stroke-linecap: round;
+}
+.gauge-arc--track {
+  stroke: var(--gauge-track);
+  stroke-width: 2.5;
+}
+#arcTrackSub { stroke-width: 3; }
+.gauge-arc--active {
+  stroke-width: 5;
+  transition: stroke-dasharray var(--dur-needle) var(--ease-out);
+}
+#semiArc {
+  stroke: url(#arcGradMain);
+  stroke-width: 5;
+}
+/* MAX：底部黄色弧线，红色实时弧会盖在它上面 */
+.gauge-arc--max {
+  stroke: #ffc02e;
+  stroke-width: 4;
+}
+#arcSub { stroke-width: 4; }
+
+/* 渐变色值走令牌：主表发光弧改为红色系，呼应红针 */
+#arcGradMain stop:nth-child(1) { stop-color: #5a1218; }
+#arcGradMain stop:nth-child(2) { stop-color: #d42a34; }
+#arcGradMain stop:nth-child(3) { stop-color: #ff5b62; }
+#arcGradSub stop:nth-child(1) { stop-color: #2f7fd6; }
+#arcGradSub stop:nth-child(2) { stop-color: var(--color-cyan); }
+
+/* 刻度 */
+.speedo__ticks line {
+  stroke: var(--gauge-tick);
+  stroke-width: 1;
+  stroke-linecap: round;
+  transition: stroke var(--dur-base);
+}
+.speedo__ticks line.is-major {
+  stroke: var(--gauge-tick-major);
+  stroke-width: 2;
+}
+.speedo__ticks--sub line { stroke-width: 0.8; }
+.speedo__ticks--sub line.is-major { stroke-width: 1.4; }
+.speedo__tick-label {
+  fill: #c4d6f2;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  text-anchor: middle;
+  dominant-baseline: central;
+  letter-spacing: 0.02em;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.9));
+}
+.speedo__ticks--sub .speedo__tick-label { font-size: 9px; }
+
+/* ---------- AVG / MAX 标线 ---------- */
+.speedo__markers { pointer-events: none; }
+.gauge-marker { --marker: #64d8ff; }
+.gauge-marker--avg { --marker: #64d8ff; }
+.gauge-marker--max { --marker: #ffb74d; }
+.gauge-marker__arrow {
+  fill: var(--marker);
+  stroke: rgba(0, 0, 0, 0.55);
+  stroke-width: 0.3;
+}
+.gauge-marker__label {
+  fill: var(--marker);
+  font-family: var(--font-mono);
+  font-size: 7px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  paint-order: stroke;
+  stroke: rgba(0, 0, 0, 0.85);
+  stroke-width: 1.6px;
+  stroke-linejoin: round;
+}
+
+/* ---------- 指针 ---------- */
+.needle {
+  transform-box: view-box;
+  transform-origin: 100px 108px;
+  transform: rotate(var(--angle, -110deg));
+  transition: transform var(--dur-needle) var(--ease-spring);
+}
+.needle--sub,
+.needle--compass {
+  transform-origin: 60px 60px;
+}
+.needle__body,
+.needle__tail {
+  transition: fill var(--dur-base);
+}
+/* 主指针：红色金属渐变 + 落盘投影 + 红色辉光 */
+.needle--main .needle__body {
+  fill: url(#needleMainGrad);
+  stroke: rgba(255, 190, 190, 0.4);
+  stroke-width: 0.5;
+  filter: drop-shadow(2px 3px 2px rgba(0, 0, 0, 0.8))
+          drop-shadow(0 0 5px rgba(255, 45, 56, 0.5));
+}
+.needle--main .needle__tail { fill: #6e1016; }
+/* 副指针 */
+.needle--sub .needle__body {
+  fill: url(#needleSubGrad);
+  stroke: rgba(190, 226, 255, 0.5);
+  stroke-width: 0.4;
+  filter: drop-shadow(1.5px 2px 1.5px rgba(0, 0, 0, 0.75))
+          drop-shadow(0 0 4px var(--gauge-glow-blue));
+}
+.needle--sub .needle__tail { fill: #1c588f; }
+/* 指南针红白指针投影 */
+.needle--compass {
+  filter: drop-shadow(1.5px 2px 1.5px rgba(0, 0, 0, 0.7));
+}
+
+.needle__hub-shadow { fill: rgba(0, 0, 0, 0.55); }
+.needle__hub-outer { fill: #0a1020; stroke: rgba(255, 255, 255, 0.3); stroke-width: 1; }
+.needle__hub { fill: var(--color-red); filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.8)); }
+.needle--sub .needle__hub { fill: var(--color-blue); }
+.compass__hub { fill: #0a1020; stroke: rgba(255, 255, 255, 0.35); stroke-width: 1; }
+.compass__hub-dot { fill: var(--color-orange); }
+.needle__hub-dot { fill: #0a1020; }
+
+/* ---------- 表盘铭牌与品牌徽标（德系机械表风格） ---------- */
+.gauge-unit-mark {
+  fill: #d6e2f5;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+}
+.benz-star circle {
+  fill: none;
+  stroke: rgba(214, 226, 245, 0.75);
+  stroke-width: 1.1;
+}
+.benz-star path {
+  fill: none;
+  stroke: rgba(214, 226, 245, 0.85);
+  stroke-width: 1.1;
+  stroke-linecap: round;
+}
+.benz-star__dot {
+  fill: rgba(214, 226, 245, 0.9) !important;
+  stroke: none !important;
+}
+/* ---------- 透视道路：扇形下方的"路" ---------- */
+.road { pointer-events: none; }
+.road__surface { stroke: none; }
+.road__edge {
+  fill: none;
+  stroke-width: 1.3;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 2px rgba(74, 168, 255, 0.55));
+}
+.road__center {
+  fill: none;
+  stroke: rgba(226, 238, 255, 0.5);
+  stroke-width: 1.6;
+  stroke-dasharray: 8 8;
+  stroke-linecap: round;
+}
+.road__rung {
+  stroke: #cfe2ff;
+  stroke-linecap: round;
+}
+
+/* 表盘脚注 */
+.speedo__foot {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-2xs);
+  color: var(--color-muted);
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+.status-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--color-green);
+  box-shadow: var(--glow-green);
+  animation: dot-breathe 2.4s ease-in-out infinite;
+}
+@keyframes dot-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* ==========================================================================
+   左：指针指南针
+   ========================================================================== */
+.compass .compass__dial {
+  width: min(100%, 104px);
+}
+.compass__rose path {
+  fill: none;
+  stroke: rgba(146, 176, 218, 0.11);
+  stroke-width: 0.8;
+  stroke-dasharray: 2 3;
+}
+.compass__ticks line {
+  stroke: rgba(170, 190, 220, 0.32);
+  stroke-width: 0.8;
+  stroke-linecap: round;
+}
+.compass__ticks line.is-major {
+  stroke: rgba(220, 235, 255, 0.7);
+  stroke-width: 1.3;
+}
+.compass__cardinals text {
+  fill: var(--color-muted-2);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 700;
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+.compass__cardinals text:first-child { fill: var(--color-orange); }
+.needle__compass-n {
+  fill: var(--needle-compass-n);
+  filter: drop-shadow(0 0 3px rgba(255, 91, 82, 0.5));
+}
+.needle__compass-s { fill: var(--needle-compass-s); }
+.compass__readout {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  font-variant-numeric: tabular-nums;
+}
+.compass__readout strong {
+  font-size: var(--fs-md);
+  font-weight: 700;
+  color: var(--color-text);
+  letter-spacing: 0.08em;
+}
+.compass__readout span {
+  font-size: var(--fs-2xs);
+  color: var(--color-muted);
+}
+
+/* ==========================================================================
+   副速度表：可点击
+   ========================================================================== */
+.speedo--sub {
+  text-align: left;
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.speedo--sub:hover {
+  transform: translateY(-2px) scale(1.035);
+}
+.speedo--sub:active {
+  transform: scale(0.97);
+}
+.speedo--sub .speedo__dial {
+  width: min(100%, 104px);
+  transition: filter var(--dur-fast);
+}
+.speedo--sub:hover .speedo__dial {
+  filter: drop-shadow(0 0 12px rgba(74, 168, 255, 0.28));
+}
+.speedo--sub .speedo__foot {
+  color: var(--color-blue);
+}
+
+/* ==========================================================================
+   AVG / MAX / km 副表
+   ========================================================================== */
+.subtable {
+  flex: 0 0 62px;
+  display: flex;
+  align-items: center;
+  margin-top: 4px;
+  border-top: 1px solid var(--color-line);
+  border-bottom: 1px solid var(--color-line);
+}
+.subtable__col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  position: relative;
+}
+.subtable__col + .subtable__col::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 12%;
+  height: 76%;
+  width: 1px;
+  background: var(--color-border);
+}
+.subtable__tag {
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.14em;
+  color: var(--color-muted);
+  font-weight: 600;
+}
+.subtable__val {
+  font-family: var(--font-seg);
+  font-size: 27px;
+  line-height: 1;
+  color: var(--color-text);
+  text-shadow: 0 0 12px rgba(130, 190, 255, 0.22);
+  letter-spacing: 0.02em;
+}
+
+/* ==========================================================================
+   助力控制卡
+   ========================================================================== */
+.assist {
+  flex: 0 0 130px;
+  margin-top: 6px;
+  border: 1px solid transparent;
+  border-radius: var(--r-xl);
+  /* 渐变描边 + 深色填充双层背景（border-box / padding-box） */
+  background:
+    linear-gradient(135deg, #2c2314 0%, #1a1c28 38%, #141b2d 100%) padding-box,
+    linear-gradient(135deg, rgba(255, 190, 80, 0.85), rgba(255, 160, 40, 0.3) 55%, rgba(255, 180, 60, 0.5)) border-box;
+  box-shadow: var(--shadow-2);
+}
+.assist__head {
+  height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 13px;
+}
+.assist__head svg {
+  width: 17px;
+  height: 17px;
+  color: var(--color-orange);
+}
+.assist__head strong {
+  font-size: var(--fs-md);
+  font-weight: 700;
+}
+.assist__head em {
+  font-style: normal;
+  font-size: var(--fs-md);
+  font-weight: 700;
+  color: var(--color-orange);
+}
+.assist__battery {
+  margin-left: auto;
+  width: 10px;
+  height: 17px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 2px;
+  position: relative;
+}
+.assist__battery::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 1px;
+  right: 1px;
+  height: 70%;
+  background: var(--color-blue);
+  border-radius: 1px;
+}
+.assist__battery::after {
+  content: "";
+  position: absolute;
+  right: -3px;
+  top: 4px;
+  width: 2px;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 0 1px 1px 0;
+}
+.assist__modes {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+  padding: 0 12px;
+}
+.assist__modes button {
+  height: 38px;
+  border-radius: var(--r-md);
+  background: rgba(255, 255, 255, 0.055);
+  border: 1px solid var(--color-border-soft);
+  color: var(--color-muted-2);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  transition: transform var(--dur-fast), background var(--dur-fast), color var(--dur-fast);
+}
+.assist__modes button:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--color-text);
+  transform: translateY(-1px);
+}
+.assist__modes button.is-active {
+  background: linear-gradient(180deg, #ffc44d, #f5a015);
+  color: #20160a;
+  border-color: transparent;
+  box-shadow: 0 4px 14px rgba(245, 160, 21, 0.35);
+}
+.assist__control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px 10px;
+}
+.assist__step {
+  flex: 0 0 38px;
+  height: 38px;
+  border-radius: var(--r-md);
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid var(--color-border-soft);
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 20px;
+  line-height: 1;
+  transition: background var(--dur-fast);
+}
+.assist__step:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+.assist__slider {
+  position: relative;
+  flex: 1;
+  height: 6px;
+  border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.13);
+  cursor: pointer;
+}
+.assist__slider-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 45%;
+  border-radius: var(--r-pill);
+  background: rgba(255, 176, 32, 0.65);
+  transition: width var(--dur-fast) var(--ease-out);
+}
+.assist__slider-thumb {
+  position: absolute;
+  top: 50%;
+  left: 45%;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  transform: translate(-50%, -50%);
+  transition: left var(--dur-fast) var(--ease-out), transform var(--dur-fast);
+}
+.assist__slider:hover .assist__slider-thumb,
+.assist__slider:focus-visible .assist__slider-thumb {
+  transform: translate(-50%, -50%) scale(1.18);
+}
+
+/* ==========================================================================
+   传感器行
+   ========================================================================== */
+.sensors {
+  flex: 0 0 80px;
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+.sensor {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 9px;
+  border-radius: var(--r-lg);
+  border: 1px solid;
+  display: flex;
+  flex-direction: column;
+}
+.sensor--blue {
+  background: rgba(74, 168, 255, 0.055);
+  border-color: rgba(74, 168, 255, 0.42);
+  --sensor-accent: var(--color-blue);
+}
+.sensor--green {
+  background: rgba(61, 220, 140, 0.045);
+  border-color: rgba(61, 220, 140, 0.34);
+  --sensor-accent: var(--color-green);
+}
+.sensor--cyan {
+  background: rgba(130, 190, 255, 0.045);
+  border-color: rgba(130, 190, 255, 0.34);
+  --sensor-accent: var(--color-cyan);
+}
+.sensor__top {
+  font-size: var(--fs-xs);
+  color: var(--color-muted-2);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.sensor__top b {
+  color: var(--sensor-accent);
+  font-weight: 700;
+}
+.sensor__bar {
+  position: relative;
+  height: 8px;
+  margin: 6px 0 5px;
+  border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid color-mix(in srgb, var(--sensor-accent) 38%, transparent);
+  overflow: hidden;
+}
+.sensor__bar i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  border-radius: var(--r-pill);
+  background: var(--sensor-accent);
+  box-shadow: 0 0 8px var(--sensor-accent);
+}
+.sensor__value {
+  font-family: var(--font-seg);
+  font-size: 25px;
+  line-height: 1;
+  color: var(--sensor-accent);
+  text-align: center;
+  letter-spacing: -0.02em;
+}
+.sensor__value span {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  margin-left: 2px;
+}
+
+/* ---------- 版本行 ---------- */
+.version {
+  flex: 0 0 18px;
+  display: grid;
+  place-items: center;
+  margin-top: 4px;
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.08em;
+  color: var(--color-orange);
+  opacity: 0.75;
+}
+
+/* ==========================================================================
+   底部导航
+   ========================================================================== */
+.bottomnav {
+  flex: 0 0 62px;
+  display: flex;
+  align-items: center;
+  padding: 0 18px;
+  background: var(--color-nav);
+  border-top: 1px solid var(--color-border-soft);
+}
+.bottomnav button {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  color: var(--color-muted);
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.06em;
+  transition: color var(--dur-fast), transform var(--dur-fast);
+}
+.bottomnav button svg {
+  width: 22px;
+  height: 22px;
+}
+.bottomnav button:hover {
+  color: var(--color-text);
+  transform: translateY(-2px);
+}
+.bottomnav button.is-active {
+  color: var(--color-orange);
+}
+.bottomnav button.is-active svg {
+  filter: drop-shadow(0 0 6px var(--gauge-glow-orange));
+}
+
+/* ==========================================================================
+   轻提示
+   ========================================================================== */
+.toast {
+  position: absolute;
+  left: 50%;
+  bottom: 74px;
+  transform: translate(-50%, 12px);
+  max-width: 84%;
+  padding: 8px 14px;
+  border-radius: var(--r-pill);
+  background: rgba(20, 27, 45, 0.96);
+  border: 1px solid rgba(255, 176, 32, 0.45);
+  box-shadow: var(--shadow-2);
+  font-size: var(--fs-xs);
+  color: var(--color-text);
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-base) var(--ease-out), transform var(--dur-base) var(--ease-out);
+  z-index: 20;
+}
+.toast.is-visible {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+/* ==========================================================================
+   入场序列：按 data-reveal 顺序错峰 70ms
+   ========================================================================== */
+.reveal {
+  opacity: 0;
+  transform: translateY(16px);
+}
+.gauge.reveal {
+  transform: translateY(16px) scale(0.9);
+}
+.reveal.is-in {
+  opacity: 1;
+  transform: none;
+  transition: opacity var(--dur-base) var(--ease-out),
+              transform var(--dur-base) var(--ease-out);
+}
+.reveal[data-reveal="0"].is-in { transition-delay: 0ms; }
+.reveal[data-reveal="1"].is-in { transition-delay: 70ms; }
+.reveal[data-reveal="2"].is-in { transition-delay: 140ms; }
+.reveal[data-reveal="3"].is-in { transition-delay: 210ms; }
+.reveal[data-reveal="4"].is-in { transition-delay: 280ms; }
+.reveal[data-reveal="5"].is-in { transition-delay: 350ms; }
+.reveal[data-reveal="6"].is-in { transition-delay: 420ms; }
+.reveal[data-reveal="7"].is-in { transition-delay: 490ms; }
+.reveal[data-reveal="8"].is-in { transition-delay: 560ms; }
+.reveal[data-reveal="9"].is-in { transition-delay: 630ms; }
+.reveal[data-reveal="10"].is-in { transition-delay: 700ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal,
+  .gauge.reveal {
+    opacity: 1;
+    transform: none;
+  }
+}

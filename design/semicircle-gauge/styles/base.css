@@ -1,0 +1,156 @@
+/* ==========================================================================
+   基础层：字体声明 / 重置 / 页面氛围 / 焦点与降级动效
+   ========================================================================== */
+
+/* ---------- 数码管字体：项目本地同源 ---------- */
+@font-face {
+  font-family: "DSEG7Classic";
+  src: url("../fonts/SEGClassic.ttf") format("truetype");
+  font-display: swap;
+}
+@font-face {
+  font-family: "DSEG7Mini";
+  src: url("../fonts/SEGMini.ttf") format("truetype");
+  font-display: swap;
+}
+
+/* ---------- 重置 ---------- */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  font-family: var(--font-mono);
+  color: var(--color-text);
+  background:
+    radial-gradient(900px 620px at 18% -8%, rgba(74, 168, 255, 0.13), transparent 62%),
+    radial-gradient(760px 560px at 100% 8%, rgba(255, 176, 32, 0.09), transparent 58%),
+    radial-gradient(900px 700px at 50% 120%, rgba(61, 220, 140, 0.06), transparent 60%),
+    #060a14;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 24px 16px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------- 预览控件（手机外） ---------- */
+.preview-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.preview-title {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: #c4d6f2;
+}
+.variant-bar {
+  display: flex;
+  gap: 6px;
+  padding: 5px;
+  border-radius: 12px;
+  background: rgba(16, 24, 44, 0.9);
+  border: 1px solid rgba(150, 180, 230, 0.2);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+}
+.variant-bar button {
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #8fa3c6;
+  letter-spacing: 0.03em;
+  transition: background 0.2s, color 0.2s, box-shadow 0.2s;
+}
+.variant-bar button:hover { color: #e6f0ff; }
+.variant-bar button.is-active {
+  color: #0b1120;
+  background: linear-gradient(135deg, #8fd0ff, #4aa8ff);
+  box-shadow: 0 0 16px rgba(74, 168, 255, 0.45);
+}
+
+/* 颗粒质感层：SVG 噪声，低透明叠加 */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 99;
+  opacity: 0.045;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-cyan);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ---------- 手机屏幕容器 ---------- */
+.phone {
+  position: relative;
+  width: var(--screen-w);
+  height: var(--screen-h);
+  border-radius: 34px;
+  overflow: hidden;
+  background: linear-gradient(180deg, #0c1120 0%, #0a0e1c 100%);
+  border: 1px solid rgba(150, 180, 230, 0.18);
+  box-shadow:
+    var(--shadow-3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 0 0 8px rgba(8, 12, 24, 0.72);
+  display: flex;
+  flex-direction: column;
+  isolation: isolate;
+}
+
+/* 屏幕内部氛围：顶部冷光 + 表盘区暖光 */
+.phone::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(420px 220px at 50% 22%, rgba(74, 168, 255, 0.1), transparent 70%),
+    radial-gradient(240px 180px at 50% 34%, rgba(255, 176, 32, 0.07), transparent 72%);
+}
+
+/* ---------- 降级动效：系统减少动态效果时关闭一切动画 ---------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-delay: 0ms !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+  /* 指针直接落到终值，不做扫动 */
+  .needle,
+  .gauge-arc--active {
+    transition: none !important;
+  }
+}

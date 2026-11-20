@@ -18,6 +18,7 @@ import '../services/gps_service.dart';
 import '../theme/dashboard_theme.dart';
 import '../theme/sensor_status.dart';
 import '../widgets/app_dialogs.dart';
+import '../widgets/needle_speedometer.dart';
 import '../widgets/segment_display.dart';
 
 /// 陀螺仪双向分段条的配置：`side` 为 -1 下坡（向左）、0 平路、1 上坡（向右），
@@ -53,6 +54,12 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   Timer? _refreshTimer;
+
+  /// 速度区当前页：0=指针表盘（默认），1=数码管数字。左右滑动切换。
+  int _speedPage = 0;
+
+  /// 速度区本次横向拖动累计位移，用于松手时判断切换方向（比甩动速度更稳）。
+  double _speedDragDx = 0;
 
   /// 正在等待设备确认的指令说明（非空时禁用助力按钮）
   String? _pendingCommand;
@@ -121,7 +128,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 children: [
                   // 速度区吃掉剩余空间（规格 218px）
                   Expanded(child: _buildSpeedHero(ble, gps, data, scale, demo)),
-                  _buildSubTable(ble, gps, data, scale, demo),
+                  // 表盘页走极简沉浸模式：收起 AVG/MAX/km 一排，把空间让给放大后的表盘。
+                  // 数字页保持原样。widget 仍在树中（高度归零 + 裁剪），既有断言不受影响。
+                  _buildSubTable(ble, gps, data, scale, demo,
+                      collapsed: _speedPage == 0),
                   _buildAssistCard(ble, scale, demo),
                   _buildSensorRow(data, scale),
                   _buildVersionLine(scale, demo),
@@ -145,9 +155,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  /// 主速度区：七段液晶大字 + 顶部同一栏（左侧骑行时间 / 右上角副速度）。
+  /// 主速度区：指针表盘（默认）与七段液晶大字左右滑动切换，右上角副速度常驻。
   ///
-  /// 副速度对比在右上角；骑行时间与闪控状态已移到顶部状态栏。
+  /// 两视图始终 Stack 叠加在各自的原位置，仅切换透明度：这样数码管视图的
+  /// key / 布局坐标保持不变（既有测试与无障碍读取不受影响），同时默认呈现
+  /// 用户选定的仿真指针表盘。向右滑回表盘、向左滑到数字。
   Widget _buildSpeedHero(
       BleService ble, GpsService gps, BikeData data, double s, bool demo) {
     final useGps = gps.source == SpeedSource.gps;
@@ -162,26 +174,121 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ? (data.speedAvailable ? data.speed.toStringAsFixed(1) : '--')
             : (gps.speedKmh?.toStringAsFixed(1) ?? '--'));
 
+    // 表盘标线与副表采用同一套来源逻辑：演示模式固定演示 AVG/MAX；
+    // 真实模式 GPS 取 GPS 统计，蓝牙取设备上报（无 trip 数据时视作无效）。
+    final markerUseGps = !demo && gps.source == SpeedSource.gps;
+    final avgMark = demo
+        ? DemoRideData.avgSpeedKmh
+        : (markerUseGps
+            ? gps.avgSpeedKmh
+            : (data.tripAvailable ? data.avgSpeed : null));
+    final maxMark = demo
+        ? DemoRideData.maxSpeedKmh
+        : (markerUseGps
+            ? gps.maxSpeedKmh
+            : (data.tripAvailable ? data.maxSpeed : null));
+
+    final showGauge = _speedPage == 0;
+
     return Padding(
-      padding: EdgeInsets.symmetric(horizontal: 12 * s),
-      child: Stack(
-        children: [
-          Center(child: _buildSpeedNumber(speedText, useGps, s)),
-          if (showComparison)
-            Positioned(
-              right: 2 * s,
-              top: 6 * s,
-              child: _buildSecondaryPill(
-                secondaryValue,
-                !useGps,
-                s,
-                onTap: () => unawaited(_toggleSpeedSource(gps, useGps)),
+      // 左右留白收到最小，把宽度尽量让给放大后的表盘（FittedBox 仍会按高度兜底）。
+      padding: EdgeInsets.symmetric(horizontal: 4 * s),
+      child: GestureDetector(
+        // 横向滑动切换视图；translucent 让整块区域都能接收拖动，
+        // 同时 tap 手势仍下发给子级（副速度 pill），两者不抢占。
+        behavior: HitTestBehavior.translucent,
+        onHorizontalDragStart: (_) => _speedDragDx = 0,
+        onHorizontalDragUpdate: (details) => _speedDragDx += details.delta.dx,
+        onHorizontalDragEnd: (_) {
+          // 左滑（累计负位移）看数字，右滑看表盘；位移过小则不切换，避免误触。
+          if (_speedDragDx < -40 && _speedPage == 0) {
+            setState(() => _speedPage = 1);
+          } else if (_speedDragDx > 40 && _speedPage == 1) {
+            setState(() => _speedPage = 0);
+          }
+          _speedDragDx = 0;
+        },
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            // 数码管视图：位置与尺寸完全沿用旧实现，仅淡入淡出。
+            AnimatedOpacity(
+              key: const ValueKey('speed-number-page'),
+              opacity: showGauge ? 0 : 1,
+              duration: const Duration(milliseconds: 260),
+              child: Center(child: _buildSpeedNumber(speedText, useGps, s)),
+            ),
+            // 指针表盘视图：默认可见。表盘页收起副表后区域更高，放大填充。
+            AnimatedOpacity(
+              key: const ValueKey('speed-gauge-page'),
+              opacity: showGauge ? 1 : 0,
+              duration: const Duration(milliseconds: 260),
+              child: Padding(
+                // 底部只留页指示点的空间，尽量把高度让给放大后的无框表盘。
+                padding: EdgeInsets.only(bottom: 10 * s),
+                child: Center(
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: NeedleSpeedometer(
+                      speed: value,
+                      useGps: useGps,
+                      avgSpeed: avgMark,
+                      peakSpeed: maxMark,
+                      size: 420 * s,
+                    ),
+                  ),
+                ),
               ),
             ),
-        ],
+            // 右上角副速度（切换来源）：表盘页极简模式淡出隐藏，数字页显示。
+            // 保留透明热区而非移除：既不破坏视觉简洁，又让表盘页右上角仍可切来源
+            // （表盘中心图标随之变化），同时兼容既有 key / tap 断言。
+            if (showComparison)
+              Positioned(
+                right: 2 * s,
+                top: 6 * s,
+                child: AnimatedOpacity(
+                  opacity: showGauge ? 0 : 1,
+                  duration: const Duration(milliseconds: 220),
+                  child: _buildSecondaryPill(
+                    secondaryValue,
+                    !useGps,
+                    s,
+                    onTap: () => unawaited(_toggleSpeedSource(gps, useGps)),
+                  ),
+                ),
+              ),
+            // 页指示：两个小点提示可左右滑动。
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 2 * s,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  _pageDot(active: showGauge, s: s),
+                  SizedBox(width: 6 * s),
+                  _pageDot(active: !showGauge, s: s),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
+
+  Widget _pageDot({required bool active, required double s}) => AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        width: active ? 14 * s : 5 * s,
+        height: 5 * s,
+        decoration: BoxDecoration(
+          color: active
+              ? DashColors.orange
+              : Colors.white.withValues(alpha: 0.28),
+          borderRadius: BorderRadius.circular(3 * s),
+        ),
+      );
 
   /// 单击右上角副速度区域：在蓝牙 / GPS 之间交替切换主速度来源。
   /// 大字与副速度的数值随之互换，副速度始终展示「另一个来源」。
@@ -286,7 +393,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   /// 副表：三列等宽 AVG / MAX / km，角标位于各自小数位正上方（规格 §2.4）
   Widget _buildSubTable(
-      BleService ble, GpsService gps, BikeData data, double s, bool demo) {
+      BleService ble, GpsService gps, BikeData data, double s, bool demo,
+      {bool collapsed = false}) {
     // 演示时三列都取演示数据，忽略 GPS 主来源与真实设备的空值标记。
     final useGps = !demo && gps.source == SpeedSource.gps;
     final avg = useGps ? gps.avgSpeedKmh : data.avgSpeed;
@@ -294,14 +402,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final trip = useGps ? gps.tripKm : data.tripDistance;
     final available = demo || useGps || data.tripAvailable;
 
-    return Container(
-      height: 76 * s,
-      margin: EdgeInsets.fromLTRB(14 * s, 2 * s, 14 * s, 0),
-      decoration: const BoxDecoration(
-        border: Border(
-          top: BorderSide(color: DashColors.subLine),
-          bottom: BorderSide(color: DashColors.subLine),
-        ),
+    // 表盘页收起这一排：高度平滑归零 + 裁剪，让位给放大的表盘。
+    // 子树保留在 widget 树中（高度 0 不影响 key 查找），数字页恢复原高度。
+    return AnimatedContainer(
+      key: const ValueKey('sub-table-row'),
+      duration: const Duration(milliseconds: 260),
+      height: collapsed ? 0 : 76 * s,
+      clipBehavior: Clip.hardEdge,
+      margin: collapsed
+          ? EdgeInsets.zero
+          : EdgeInsets.fromLTRB(14 * s, 2 * s, 14 * s, 0),
+      decoration: BoxDecoration(
+        border: collapsed
+            ? null
+            : const Border(
+                top: BorderSide(color: DashColors.subLine),
+                bottom: BorderSide(color: DashColors.subLine),
+              ),
       ),
       child: Row(
         children: [

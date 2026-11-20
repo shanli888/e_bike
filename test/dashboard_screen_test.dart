@@ -12,6 +12,7 @@ import 'package:bike_computer/services/gps_service.dart';
 import 'package:bike_computer/services/ride_time_service.dart';
 import 'package:bike_computer/theme/dashboard_theme.dart';
 import 'package:bike_computer/theme/sensor_status.dart';
+import 'package:bike_computer/widgets/needle_speedometer.dart';
 import 'package:bike_computer/widgets/segment_display.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
@@ -857,6 +858,10 @@ void main() {
     ));
 
     expect(tester.takeException(), isNull);
+    // 表盘页极简模式已收起 AVG/MAX/km 一排；左滑切到数字页再验证三列副表布局。
+    await tester.drag(find.byKey(const ValueKey('speed-gauge-page')),
+        const Offset(-160, 0));
+    await tester.pumpAndSettle();
     final avgY = tester.getCenter(_key('sub-tag-AVG')).dy;
     for (final tag in ['MAX', 'km']) {
       expect((tester.getCenter(_key('sub-tag-$tag')).dy - avgY).abs(),
@@ -1136,5 +1141,177 @@ void main() {
     }
 
     await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('速度区默认显示扇形指针表盘，来源由语义标签表达', (tester) async {
+    final ble = BleService();
+    ble.bikeData.clearReadOnlyAvailability();
+    ble.bikeData.speed = 42.0;
+    ble.bikeData.speedAvailable = true;
+    final connected = _ConnectedBleService(ble);
+    await tester.pumpWidget(_wrap(_screen(), connected, GpsService()));
+
+    // 默认表盘页不透明、数字页透明，但两者都在树中（旧测试/key 不受影响）。
+    expect(find.byKey(const ValueKey('speed-gauge-page')), findsOneWidget);
+    expect(find.byKey(const ValueKey('speed-number-page')), findsOneWidget);
+    final gaugeOpacity = tester.widget<AnimatedOpacity>(
+        find.byKey(const ValueKey('speed-gauge-page')));
+    final numberOpacity = tester.widget<AnimatedOpacity>(
+        find.byKey(const ValueKey('speed-number-page')));
+    expect(gaugeOpacity.opacity, 1.0);
+    expect(numberOpacity.opacity, 0.0);
+
+    // 设计稿已去掉盘面中心来源图标；来源改由语义标签表达。
+    expect(find.byKey(const ValueKey('needle-speedometer')), findsOneWidget);
+    Semantics gaugeSemantics = tester.widget<Semantics>(
+        find.ancestor(of: find.byKey(const ValueKey('needle-speedometer')),
+            matching: find.byType(Semantics)).first);
+    expect(gaugeSemantics.properties.label, contains('来源蓝牙'));
+
+    // 表盘页极简模式：副速度 pill 淡出、AVG/MAX/km 一排收起（高度 0）。
+    final gps = _TestGpsService()..setCompare(true);
+    await tester.pumpWidget(_wrap(_screen(), connected, gps));
+    final pillOpacity = tester.widget<AnimatedOpacity>(
+        find.ancestor(
+            of: _key('compare-speed-pill'),
+            matching: find.byType(AnimatedOpacity)).first);
+    expect(pillOpacity.opacity, 0.0);
+    expect(tester.getSize(_key('sub-table-row')).height, 0.0);
+
+    // 左滑切到数字页：pill 恢复、AVG/MAX/km 一排恢复原高度。
+    await tester.drag(
+        find.byKey(const ValueKey('speed-gauge-page')), const Offset(-160, 0));
+    await tester.pumpAndSettle();
+    final pillOpacityNum = tester.widget<AnimatedOpacity>(
+        find.ancestor(
+            of: _key('compare-speed-pill'),
+            matching: find.byType(AnimatedOpacity)).first);
+    expect(pillOpacityNum.opacity, 1.0);
+    expect(tester.getSize(_key('sub-table-row')).height, greaterThan(0));
+
+    // 数字页点 pill 切换为 GPS 后，表盘语义标签同步为 GPS。
+    await tester.tap(_key('compare-speed-pill'));
+    await tester.pumpAndSettle();
+    expect(gps.source, SpeedSource.gps);
+    Semantics gpsSemantics = tester.widget<Semantics>(
+        find.ancestor(of: find.byKey(const ValueKey('needle-speedometer')),
+            matching: find.byType(Semantics)).first);
+    expect(gpsSemantics.properties.label, contains('来源GPS'));
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    connected.dispose();
+  });
+
+  test('指针动画进度在低速演示区间仍为正值且角度各不相同', () {
+    // 演示速度约 22~27 km/h：曾因混入 -135° 偏移得到负进度，指针卡在正上方。
+    for (final v in [0.0, 22.0, 24.0, 27.0, 60.0]) {
+      final p = NeedleSpeedometer.progressFor(v);
+      expect(p, greaterThanOrEqualTo(0.0));
+      expect(p, lessThanOrEqualTo(1.0));
+    }
+    // 演示波动必须映射到不同角度，指针才会随之扫动。
+    expect(NeedleSpeedometer.radiansFor(NeedleSpeedometer.progressFor(22.0)),
+        isNot(closeTo(NeedleSpeedometer.radiansFor(
+            NeedleSpeedometer.progressFor(27.0)), 0.01)));
+    // 端点：-135° 与 +135°。
+    expect(NeedleSpeedometer.radiansFor(0.0), closeTo(-135 * 3.141592653589793 / 180, 1e-6));
+    expect(NeedleSpeedometer.radiansFor(1.0), closeTo(135 * 3.141592653589793 / 180, 1e-6));
+  });
+
+  test('路纹滚动速率跟随车速：0 速为 0，越快越急', () {
+    // 速度为 0（进度 0）时路面完全静止。
+    expect(NeedleSpeedometer.roadCyclesPerSec(0.0), 0.0);
+    // 满速约 0.9 圈/秒。
+    expect(NeedleSpeedometer.roadCyclesPerSec(1.0), closeTo(0.9, 1e-9));
+    // 随速度单调递增。
+    expect(
+      NeedleSpeedometer.roadCyclesPerSec(0.5),
+      greaterThan(NeedleSpeedometer.roadCyclesPerSec(0.25)),
+    );
+    // 用 0 速换算仍是 0：里程/速度都为 0 时不会误动。
+    expect(
+      NeedleSpeedometer.roadCyclesPerSec(
+          NeedleSpeedometer.progressFor(0.0)),
+      0.0,
+    );
+  });
+
+  test('AVG/MAX 标线进度会夹到量程且忽略 0 / 空值', () {
+    expect(NeedleSpeedometer.markerProgress(null), isNull);
+    expect(NeedleSpeedometer.markerProgress(0), isNull);
+    expect(NeedleSpeedometer.markerProgress(-5), isNull);
+    expect(NeedleSpeedometer.markerProgress(72), closeTo(1.0, 1e-6));
+    expect(NeedleSpeedometer.markerProgress(18.6), closeTo(18.6 / 60, 1e-6));
+  });
+
+  testWidgets('表盘 AVG/MAX 标线值写入语义标签，无效值不写入', (tester) async {
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(
+        body: Center(
+          child: NeedleSpeedometer(
+            speed: 24,
+            useGps: false,
+            avgSpeed: 18.6,
+            peakSpeed: 36.8,
+          ),
+        ),
+      ),
+    ));
+    Semantics sem = tester.widget<Semantics>(find.ancestor(
+        of: find.byKey(const ValueKey('needle-speedometer')),
+        matching: find.byType(Semantics)).first);
+    expect(sem.properties.label, contains('来源蓝牙'));
+    expect(sem.properties.label, contains('平均速度18.6'));
+    expect(sem.properties.label, contains('最高速度36.8'));
+
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(
+        body: Center(
+          child: NeedleSpeedometer(
+            speed: 24,
+            useGps: true,
+            avgSpeed: 0,
+            peakSpeed: null,
+          ),
+        ),
+      ),
+    ));
+    sem = tester.widget<Semantics>(find.ancestor(
+        of: find.byKey(const ValueKey('needle-speedometer')),
+        matching: find.byType(Semantics)).first);
+    expect(sem.properties.label, contains('来源GPS'));
+    expect(sem.properties.label, isNot(contains('平均速度')));
+    expect(sem.properties.label, isNot(contains('最高速度')));
+  });
+
+  testWidgets('速度区左右滑动在表盘与数字视图间切换', (tester) async {
+    final ble = BleService();
+    ble.bikeData.clearReadOnlyAvailability();
+    ble.bikeData.speed = 30.0;
+    ble.bikeData.speedAvailable = true;
+    final connected = _ConnectedBleService(ble);
+    await tester.pumpWidget(_wrap(_screen(), connected, GpsService()));
+
+    final gauge = find.byKey(const ValueKey('speed-gauge-page'));
+    expect(tester.widget<AnimatedOpacity>(gauge).opacity, 1.0);
+
+    // 向左滑：切到数字视图
+    await tester.drag(gauge, const Offset(-160, 0));
+    await tester.pumpAndSettle();
+    expect(tester.widget<AnimatedOpacity>(gauge).opacity, 0.0);
+    expect(
+        tester
+            .widget<AnimatedOpacity>(
+                find.byKey(const ValueKey('speed-number-page')))
+            .opacity,
+        1.0);
+
+    // 向右滑：切回表盘
+    await tester.drag(gauge, const Offset(160, 0));
+    await tester.pumpAndSettle();
+    expect(tester.widget<AnimatedOpacity>(gauge).opacity, 1.0);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    connected.dispose();
   });
 }

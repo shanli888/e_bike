@@ -1,7 +1,7 @@
 name: bike_computer
 description: LVBU/WePower 电动助力控制器 - 离线蓝牙版（骑行数据 + 助力控制）
 publish_to: 'none'
-version: 1.6.57+68
+version: 1.6.66+77
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
