@@ -65,10 +65,7 @@ void main() {
     }
   });
 
-  test('高温/低电红色是正红，不带粉红偏色', () {
-    expect(DashColors.red, const Color(0xFFFF0000));
-    expect(DashColors.red.r, 1.0);
-    expect(DashColors.red.g, 0.0);
-    expect(DashColors.red.b, 0.0);
+  test('Critical telemetry uses muted coral', () {
+    expect(DashColors.red, const Color(0xFFE58D80));
   });
 }

@@ -42,9 +42,8 @@ class DashColors {
   static const Color sourceBluetooth = blue;
   static const Color sourceGps = green;
 
-  /// 传感器分级配色：低电/过热用**正红**（纯 #FF0000，无蓝绿分量偏色），
-  /// 温度偏热用黄色。原先的 #FF5468 蓝分量偏高、看起来接近粉红。
-  static const Color red = Color(0xFFFF0000);
+  /// Muted coral for critical battery, temperature, and uphill indicators.
+  static const Color red = Color(0xFFE58D80);
   static const Color yellow = Color(0xFFFFD54F);
 
   static const Color segOn = Color(0xFFF4F9FF);
@@ -67,22 +66,22 @@ class DashColors {
     begin: Alignment(-0.7, -1),
     end: Alignment(0.8, 1),
     colors: [
-      Color(0xF2FFBE50),
-      Color(0x59FFA028),
-      Color(0x8CFFB43C),
+      Color(0x7AFFBD62),
+      Color(0x2A8DA7CF),
+      Color(0x3C8DA7CF),
     ],
   );
 
   static const LinearGradient assistFill = LinearGradient(
     begin: Alignment(-0.7, -1),
     end: Alignment(0.8, 1),
-    colors: [Color(0xFF2C2314), Color(0xFF1A1C28), Color(0xFF141B2D)],
+    colors: [Color(0xFF222323), Color(0xFF151D2B), Color(0xFF121927)],
     stops: [0.0, 0.34, 1.0],
   );
 
   static const LinearGradient modeSelected = LinearGradient(
     begin: Alignment.topCenter,
     end: Alignment.bottomCenter,
-    colors: [Color(0xFFFFC44D), Color(0xFFF5A015)],
+    colors: [Color(0xFF393024), Color(0xFF292722)],
   );
 }

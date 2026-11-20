@@ -236,7 +236,13 @@ void main() {
     expect(_segment(tester, 'sub-value-MAX').text, '0.0');
     expect(_segment(tester, 'sub-value-km').text, '1.5');
     expect(_segment(tester, 'sub-value-km').semanticsLabel, '1.5 km');
-    expect(find.textContaining('km/h'), findsNothing);
+    expect(
+        find.descendant(
+          of: _key('speed-number-page'),
+          matching: find.textContaining('km/h'),
+        ),
+        findsNothing,
+      );
 
     // 助力卡与三张传感器卡按新稿命名。
     expect(find.text('助力控制'), findsOneWidget);
@@ -250,11 +256,9 @@ void main() {
     expect(find.text('-1.2'), findsOneWidget);
 
     // 电量 77% 属 50~80 蓝色档，温度 26.5℃ 属 <30 绿色档；
-    // 百分比、进度条填充、电压与卡片描边统一跟随档位色。
     expect(_textColor(tester, 'battery-percent'), DashColors.blue);
     expect(_textColor(tester, 'battery-voltage'), DashColors.blue);
-    expect(_cardBorderColor(tester, 'battery-card'),
-        DashColors.blue.withValues(alpha: 0.42));
+    expect(_cardBorderColor(tester, 'battery-card'), DashColors.line);
     expect(_textColor(tester, 'temperature-value'), DashColors.green);
     expect(find.text('正常'), findsOneWidget);
     expect(_key('battery-bar'), findsOneWidget);
@@ -382,8 +386,7 @@ void main() {
           reason: '电量 ${c.battery}% 的百分比配色');
       expect(_textColor(tester, 'battery-voltage'), c.batteryColor,
           reason: '电量 ${c.battery}% 的电压配色');
-      expect(_cardBorderColor(tester, 'battery-card'),
-          c.batteryColor.withValues(alpha: 0.42),
+      expect(_cardBorderColor(tester, 'battery-card'), DashColors.line,
           reason: '电量 ${c.battery}% 的卡片描边');
       expect(
         tester
@@ -405,8 +408,7 @@ void main() {
 
       expect(_textColor(tester, 'temperature-value'), c.tempColor,
           reason: '温度 ${c.temp}℃ 的配色');
-      expect(_cardBorderColor(tester, 'temperature-card'),
-          c.tempColor.withValues(alpha: 0.34),
+      expect(_cardBorderColor(tester, 'temperature-card'), DashColors.line,
           reason: '温度 ${c.temp}℃ 的卡片描边');
       expect(find.text(c.label), findsOneWidget, reason: '温度 ${c.temp}℃ 的档位标签');
       expect(tester.takeException(), isNull);
@@ -512,7 +514,13 @@ void main() {
     expect(iconCenter.dy, lessThan(60));
     expect(iconCenter.dx, greaterThan(primaryCenter.dx + 80));
     expect((primaryCenter.dx - screenWidth / 2).abs(), lessThan(60));
-    expect(find.textContaining('km/h'), findsNothing);
+    expect(
+        find.descendant(
+          of: _key('speed-number-page'),
+          matching: find.textContaining('km/h'),
+        ),
+        findsNothing,
+      );
 
     await tester.pumpWidget(const SizedBox.shrink());
     connected.dispose();
@@ -637,7 +645,14 @@ void main() {
     expect(_segment(tester, 'sub-value-km').semanticsLabel, 'km 无数据');
     expect(_key('ride-time'), findsNothing);
     expect(find.text('--'), findsWidgets);
-    expect(find.textContaining('km/h'), findsNothing);
+    expect(tester.widget<Text>(_key('gauge-speed-readout')).data, '--');
+    expect(
+        find.descendant(
+          of: _key('speed-number-page'),
+          matching: find.textContaining('km/h'),
+        ),
+        findsNothing,
+      );
 
     await tester.pumpWidget(const SizedBox.shrink());
     connected.dispose();
@@ -659,7 +674,13 @@ void main() {
     expect(find.text('01:23:45'), findsNothing);
     expect(_segment(tester, 'sub-value-km').text, '12.3');
     expect(_segment(tester, 'sub-value-km').semanticsLabel, '12.3 km');
-    expect(find.textContaining('km/h'), findsNothing);
+    expect(
+        find.descendant(
+          of: _key('speed-number-page'),
+          matching: find.textContaining('km/h'),
+        ),
+        findsNothing,
+      );
 
     await tester.pumpWidget(const SizedBox.shrink());
     connected.dispose();
@@ -893,6 +914,8 @@ void main() {
     expect(find.text('演示数据'), findsNothing);
 
     final speed = double.parse(_segment(tester, 'primary-speed').text!);
+    expect(tester.widget<Text>(_key('gauge-speed-readout')).data,
+        speed.toStringAsFixed(1));
     expect(speed, greaterThan(21.0));
     expect(speed, lessThan(27.0));
     expect(_segment(tester, 'sub-value-AVG').text, '18.6');
@@ -948,7 +971,13 @@ void main() {
     expect(find.text('未连接控制器'), findsNothing);
     expect(_key('assist-slider'), findsOneWidget);
     expect(find.textContaining('不会下发指令'), findsOneWidget);
-    expect(find.textContaining('km/h'), findsNothing);
+    expect(
+        find.descendant(
+          of: _key('speed-number-page'),
+          matching: find.textContaining('km/h'),
+        ),
+        findsNothing,
+      );
     expect(tester.takeException(), isNull);
 
     await tester.pumpWidget(const SizedBox.shrink());

@@ -134,7 +134,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       collapsed: _speedPage == 0),
                   _buildAssistCard(ble, scale, demo),
                   _buildSensorRow(data, scale),
-                  _buildVersionLine(scale, demo),
+                  _buildVersionLine(scale),
                 ],
               ),
             );
@@ -278,14 +278,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _pageDot({required bool active, required double s}) => AnimatedContainer(
+  Widget _pageDot({required bool active, required double s}) =>
+      AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         width: active ? 14 * s : 5 * s,
         height: 5 * s,
         decoration: BoxDecoration(
-          color: active
-              ? DashColors.orange
-              : Colors.white.withValues(alpha: 0.28),
+          color:
+              active ? DashColors.orange : Colors.white.withValues(alpha: 0.28),
           borderRadius: BorderRadius.circular(3 * s),
         ),
       );
@@ -299,8 +299,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (!ok) {
       showAppToast(context, 'GPS 不可用：${gps.status}', error: true);
     } else {
-      showAppToast(context,
-          '主速度切换为${next.label} · 副速度显示${useGps ? 'GPS' : '蓝牙'}');
+      showAppToast(
+          context, '主速度切换为${next.label} · 副速度显示${useGps ? 'GPS' : '蓝牙'}');
     }
   }
 
@@ -514,25 +514,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   /// 助力控制卡片：整页唯一暖色高亮块（规格 §2.5）
   Widget _buildAssistCard(BleService ble, double s, bool demo) {
+    // Keep room for the slider's minimum touch height on short displays.
+    final sliderExtra = (kMinInteractiveDimension - 48 * s)
+        .clamp(0.0, kMinInteractiveDimension);
     return Container(
-      height: 212 * s,
+      height: 212 * s + sliderExtra,
       margin: EdgeInsets.fromLTRB(16 * s, 16 * s, 16 * s, 0),
       decoration: BoxDecoration(
         gradient: DashColors.assistBorder,
-        borderRadius: BorderRadius.circular(18 * s),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.28),
-            blurRadius: 30 * s,
-            offset: Offset(0, 12 * s),
-          ),
-        ],
+        borderRadius: BorderRadius.circular(16 * s),
       ),
       padding: const EdgeInsets.all(1),
       child: Container(
         decoration: BoxDecoration(
           gradient: DashColors.assistFill,
-          borderRadius: BorderRadius.circular(17 * s),
+          borderRadius: BorderRadius.circular(15 * s),
         ),
         padding: EdgeInsets.fromLTRB(16 * s, 14 * s, 16 * s, 12 * s),
         child: ble.isConnected
@@ -643,7 +639,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget _buildModeChip(BleService ble, bool enabled, AssistMode mode, double s,
       AssistMode currentMode, bool demo) {
     final selected = currentMode == mode;
-    const ink = Color(0xFF20160A);
+    const ink = DashColors.orange;
     return GestureDetector(
       key: ValueKey('mode-${mode.name}'),
       onTap: enabled
@@ -663,18 +659,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
           borderRadius: BorderRadius.circular(11 * s),
           border: Border.all(
             color: selected
-                ? Colors.transparent
-                : Colors.white.withValues(alpha: 0.06),
+                ? DashColors.orange.withValues(alpha: 0.48)
+                : DashColors.line,
           ),
-          boxShadow: selected
-              ? [
-                  BoxShadow(
-                    color: const Color(0x52F5A014),
-                    blurRadius: 14 * s,
-                    offset: Offset(0, 4 * s),
-                  ),
-                ]
-              : null,
         ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -750,12 +737,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
       {required bool demo}) {
     return SliderTheme(
       data: SliderTheme.of(context).copyWith(
-        trackHeight: 6 * s,
+        trackHeight: 4 * s,
         activeTrackColor: DashColors.orange.withValues(alpha: 0.6),
         inactiveTrackColor: Colors.white.withValues(alpha: 0.13),
-        thumbColor: Colors.white,
+        thumbColor: DashColors.segOn,
         overlayShape: SliderComponentShape.noOverlay,
-        thumbShape: RoundSliderThumbShape(enabledThumbRadius: 11.5 * s),
+        thumbShape: RoundSliderThumbShape(enabledThumbRadius: 8.5 * s),
       ),
       child: Slider(
         key: const ValueKey('assist-slider'),
@@ -780,7 +767,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   });
                 } else {
                   setState(() => _percentDraft = null);
-                  _runCommand(ble,
+                  _runCommand(
+                      ble,
                       () => ble.setAssistPercent(value.round(), priority: true),
                       '手动助力 ${value.round()}%');
                 }
@@ -935,9 +923,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
           key: const ValueKey('battery-card'),
           padding: EdgeInsets.fromLTRB(9 * s, 10 * s, 9 * s, 9 * s),
           decoration: BoxDecoration(
-            color: accent.withValues(alpha: 0.055),
+            color: DashColors.card,
             borderRadius: BorderRadius.circular(13 * s),
-            border: Border.all(color: accent.withValues(alpha: 0.42)),
+            border: Border.all(color: DashColors.line),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -979,7 +967,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           style: TextStyle(
                               color: accent,
                               fontSize: 32 * s,
-                              fontWeight: FontWeight.w400,
+                              fontWeight: FontWeight.w600,
                               letterSpacing: -0.5 * s)),
                       SizedBox(width: 2 * s),
                       Text('V',
@@ -1062,9 +1050,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
         key: keyName == null ? null : ValueKey('$keyName-card'),
         padding: EdgeInsets.fromLTRB(9 * s, 10 * s, 9 * s, 9 * s),
         decoration: BoxDecoration(
-          color: accent.withValues(alpha: 0.045),
+          color: DashColors.card,
           borderRadius: BorderRadius.circular(13 * s),
-          border: Border.all(color: accent.withValues(alpha: 0.34)),
+          border: Border.all(color: DashColors.line),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1110,7 +1098,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         style: TextStyle(
                             color: accent,
                             fontSize: 32 * s,
-                            fontWeight: FontWeight.w400,
+                            fontWeight: FontWeight.w600,
                             letterSpacing: -0.5 * s)),
                     SizedBox(width: 2 * s),
                     Text(unit,
@@ -1135,7 +1123,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.02),
         borderRadius: BorderRadius.circular(6 * s),
-        border: Border.all(color: accent.withValues(alpha: 0.34)),
+        border: Border.all(color: DashColors.line),
       ),
       child: Row(
         children: List.generate(
@@ -1147,9 +1135,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 color:
                     i < active ? accent : Colors.white.withValues(alpha: 0.09),
                 borderRadius: BorderRadius.circular(2 * s),
-                boxShadow: i < active
-                    ? [BoxShadow(color: accent, blurRadius: 6 * s)]
-                    : null,
               ),
             ),
           ),
@@ -1161,7 +1146,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   /// 坡度双向条：11 格，中心格（索引 5）是零点锚点。
   ///
   /// 无数据全灰；平路（level==0）只亮中心蓝格；下坡中心与左侧格为绿色、
-  /// 上坡中心与右侧格为红色，方向格按 [SlopeBar.level] 填充并带同色辉光。
+  /// 上坡中心与右侧格为红色，方向格按 [SlopeBar.level] 填充。
   Widget _buildSlopeBar(SlopeBar bar, double s) {
     const center = 5;
     const total = 11;
@@ -1195,9 +1180,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
               decoration: BoxDecoration(
                 color: color,
                 borderRadius: BorderRadius.circular(2 * s),
-                boxShadow: filled
-                    ? [BoxShadow(color: color, blurRadius: 6 * s)]
-                    : null,
               ),
             ),
           );
@@ -1206,19 +1188,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _buildVersionLine(double s, bool demo) {
+  Widget _buildVersionLine(double s) {
     return Container(
       height: 16 * s,
       margin: EdgeInsets.only(top: 10 * s, bottom: 12 * s),
       alignment: Alignment.center,
       child: Text(
-        'v$_version · 2026-11-16',
+        'v$_version · 2026-11-20',
         style: TextStyle(
-            color: demo
-                ? DashColors.orange.withValues(alpha: 0.72)
-                : const Color(0x6BA0AFC8),
-            fontSize: 11 * s,
-            letterSpacing: 0.6 * s),
+            color: DashColors.muted, fontSize: 11 * s, letterSpacing: 0.6 * s),
       ),
     );
   }

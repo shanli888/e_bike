@@ -4,19 +4,9 @@ import 'package:flutter/foundation.dart' show kReleaseMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
-/// 扇形指针速度仪表（无框机械盘面 + 透视道路）。
-///
-/// 由 `design/semicircle-gauge/index.html` 的效果稿移植：
-/// - 圆心下移、只保留上半弧，默认 220° 扇形（起点 -110°、扫过 220°）；
-/// - 0–60 量程、每 10 码一大格，去掉金属外框后盘面直接延伸到盒边，深色渐变形成内凹感；
-/// - 扇形下缘是一条透视道路：路面渐变 + 左右边线 + 中心虚线 + 6 条由远及近
-///   滚动的横纹；道路远端收进盘面开口的 V 形区域，像从仪表里延伸出来。
-///   横纹滚动速度与实时车速成正比：越快越急，0 速完全停下。
-/// - 刻度外缘可叠加 AVG（青）/ MAX（琥珀）两个小三角标线，分别指向平均与最高速度。
-/// - 红色活跃弧实时跟随当前速度；底部另有一条黄色弧线指示本次最高速（MAX），
-///   从起点一直画到最高速角度，更新最高速时才向外延伸，不会回缩。
-/// - 设计稿已去掉盘面中心的来源图标，来源信息改由语义标签承载。
-/// 数值只驱动指针角度与道路速度，不绘制数码管大字。
+import '../theme/dashboard_theme.dart';
+
+/// Fan-shaped speedometer with upright tick labels and a wider perspective road.
 class NeedleSpeedometer extends StatefulWidget {
   const NeedleSpeedometer({
     super.key,
@@ -95,7 +85,8 @@ class _NeedleSpeedometerState extends State<NeedleSpeedometer>
     _needleCtrl.value = NeedleSpeedometer.progressFor(widget.speed);
     _roadTicker = createTicker((elapsed) {
       final ms = elapsed.inMilliseconds.toDouble();
-      final dt = _lastElapsedMs == null ? 0.0 : (ms - _lastElapsedMs!).clamp(0, 64);
+      final dt =
+          _lastElapsedMs == null ? 0.0 : (ms - _lastElapsedMs!).clamp(0, 64);
       _lastElapsedMs = ms;
       // 路纹滚动速度与实时车速成正比：越快越急，0 速完全静止。
       // 用平滑后的指针进度，起步/刹车时路面有自然的加减速。
@@ -134,6 +125,7 @@ class _NeedleSpeedometerState extends State<NeedleSpeedometer>
   Widget build(BuildContext context) {
     final w = widget.size;
     final h = w * 184 / 200;
+    final fontFamily = DefaultTextStyle.of(context).style.fontFamily;
 
     final baseLabel = widget.speed == null
         ? '速度无数据，来源${widget.useGps ? 'GPS' : '蓝牙'}'
@@ -145,9 +137,8 @@ class _NeedleSpeedometerState extends State<NeedleSpeedometer>
       if (NeedleSpeedometer.markerProgress(widget.peakSpeed) != null)
         '最高速度${widget.peakSpeed!.clamp(0, NeedleSpeedometer.maxSpeed).toStringAsFixed(1)}',
     ];
-    final label = markerParts.isEmpty
-        ? baseLabel
-        : '$baseLabel，${markerParts.join('，')}';
+    final label =
+        markerParts.isEmpty ? baseLabel : '$baseLabel，${markerParts.join('，')}';
 
     return Semantics(
       container: true,
@@ -156,18 +147,57 @@ class _NeedleSpeedometerState extends State<NeedleSpeedometer>
         key: const ValueKey('needle-speedometer'),
         width: w,
         height: h,
-        child: AnimatedBuilder(
-          animation: _needleCtrl,
-          builder: (context, _) => CustomPaint(
-            painter: _FanPainter(
-              progress: _needleCtrl.value,
-              travel: _travel,
-              avgSpeed: widget.avgSpeed,
-              peakSpeed: widget.peakSpeed,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            AnimatedBuilder(
+              animation: _needleCtrl,
+              builder: (context, _) => CustomPaint(
+                painter: _FanPainter(
+                  progress: _needleCtrl.value,
+                  fontFamily: fontFamily,
+                  travel: _travel,
+                  avgSpeed: widget.avgSpeed,
+                  peakSpeed: widget.peakSpeed,
+                ),
+                size: Size(w, h),
+                isComplex: true,
+              ),
             ),
-            size: Size(w, h),
-            isComplex: true,
-          ),
+            Positioned(
+              left: 0,
+              right: 0,
+              top: w * 0.665,
+              child: ExcludeSemantics(
+                child: Column(
+                  children: [
+                    Text(
+                      widget.speed?.toStringAsFixed(1) ?? '--',
+                      key: const ValueKey('gauge-speed-readout'),
+                      textScaler: TextScaler.noScaling,
+                      style: TextStyle(
+                        color: DashColors.segOn,
+                        fontFamily: DashFonts.segMini,
+                        fontSize: w * 0.126,
+                        height: 1,
+                      ),
+                    ),
+                    SizedBox(height: w * 0.018),
+                    Text(
+                      'km/h',
+                      textScaler: TextScaler.noScaling,
+                      style: TextStyle(
+                        color: DashColors.muted2,
+                        fontSize: w * 0.025,
+                        height: 1,
+                        letterSpacing: w * 0.006,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -178,6 +208,7 @@ class _FanPainter extends CustomPainter {
   _FanPainter({
     required this.progress,
     required this.travel,
+    required this.fontFamily,
     this.avgSpeed,
     this.peakSpeed,
   });
@@ -187,6 +218,7 @@ class _FanPainter extends CustomPainter {
 
   /// 道路行程 0..1（循环），驱动横纹与中心虚线流动。
   final double travel;
+  final String? fontFamily;
 
   /// 平均 / 最高速度标线的原始值（km/h）。
   final double? avgSpeed;
@@ -198,10 +230,9 @@ class _FanPainter extends CustomPainter {
   static const _startDeg = NeedleSpeedometer.startDeg;
   static const _sweepDeg = NeedleSpeedometer.sweepDeg;
 
-  // 设计稿色值：只保留盘面、指针、发光弧，金属表圈已整体去掉。
   static const _dialColors = [
-    Color(0xFF1b2845),
-    Color(0xFF101a30),
+    Color(0xFF16263D),
+    Color(0xFF101A2B),
     Color(0xFF050a16),
   ];
   static const _needleColors = [
@@ -216,10 +247,10 @@ class _FanPainter extends CustomPainter {
   ];
 
   // 道路：远端收进盘面开口的 V 形区域，近端铺到盒边附近。
-  static const _roadFarY = 116.0;
+  static const _roadFarY = 115.0;
   static const _roadNearY = 176.0;
-  static const _roadFarHalf = 24.0;
-  static const _roadNearHalf = 90.0;
+  static const _roadFarHalf = 20.0;
+  static const _roadNearHalf = 96.0;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -228,11 +259,13 @@ class _FanPainter extends CustomPainter {
     canvas.scale(scale);
 
     _drawRoad(canvas);
+    canvas.translate(_c.dx, _c.dy);
+    canvas.scale(0.90);
+    canvas.translate(-_c.dx, -_c.dy);
     _drawCase(canvas);
     _drawArc(canvas);
     _drawTicks(canvas);
-    _drawMarkers(canvas);
-    _drawUnitMark(canvas);
+    _drawAvgMarker(canvas);
     _drawNeedle(canvas);
     _drawGlass(canvas);
 
@@ -286,8 +319,8 @@ class _FanPainter extends CustomPainter {
         ..shader = const LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: [Color(0x000b1b34), Color(0x80122a4a), Color(0xC71b3a63)],
-          stops: [0.0, 0.45, 1.0],
+          colors: [Color(0x00182439), Color(0x50182439), Color(0x60162843)],
+          stops: [0.0, 0.42, 1.0],
         ).createShader(roadRect),
     );
 
@@ -295,12 +328,13 @@ class _FanPainter extends CustomPainter {
     final edgeShader = const LinearGradient(
       begin: Alignment.topCenter,
       end: Alignment.bottomCenter,
-      colors: [Color(0x0A4aa8ff), Color(0xCC82d0ff)],
+      colors: [Color(0x005CA8D8), Color(0x235CA8D8), Color(0x826EBFD9)],
+      stops: [0.0, 0.34, 1.0],
     ).createShader(roadRect);
     final edgePaint = Paint()
       ..shader = edgeShader
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.3
+      ..strokeWidth = 0.8
       ..strokeCap = StrokeCap.round;
     canvas.drawLine(
       const Offset(100 - wFar, yFar),
@@ -322,9 +356,20 @@ class _FanPainter extends CustomPainter {
       8,
       (travel * 16) % 16,
       Paint()
-        ..color = const Color(0x80e2eeff)
+        ..shader = const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0x00A8C5DF), Color(0x28A8C5DF)],
+          stops: [0.0, 0.8],
+        ).createShader(roadRect)
         ..strokeWidth = 1.6
         ..strokeCap = StrokeCap.round,
+    );
+
+    canvas.drawLine(
+      const Offset(100 - wNear, yNear),
+      const Offset(100 + wNear, yNear),
+      edgePaint,
     );
 
     // 6 条横纹：由远及近滚动，近处更宽更亮
@@ -333,13 +378,13 @@ class _FanPainter extends CustomPainter {
       final p = ((i / count) + travel) % 1;
       final y = yFar + (yNear - yFar) * p;
       final hw = wFar + (wNear - wFar) * p;
-      final opacity = 0.1 + 0.6 * math.min(1.0, p * 2.2) * (1 - p * 0.45);
+      final opacity = 0.17 * p;
       canvas.drawLine(
         Offset(100 - hw, y),
         Offset(100 + hw, y),
         Paint()
           ..color = const Color(0xFFcfe2ff).withValues(alpha: opacity)
-          ..strokeWidth = 0.5 + 1.5 * p
+          ..strokeWidth = 0.35 + 0.6 * p
           ..strokeCap = StrokeCap.round,
       );
     }
@@ -371,7 +416,6 @@ class _FanPainter extends CustomPainter {
   void _drawCase(Canvas canvas) {
     const end = _startDeg + _sweepDeg;
 
-    // 金属表圈 / 投影 / 内凹槽已全部去掉：盘面自己延伸到盒边，靠渐变做内凹。
     canvas.drawPath(
       _sectorPath(92, _startDeg, end),
       Paint()
@@ -383,7 +427,29 @@ class _FanPainter extends CustomPainter {
         ).createShader(const Rect.fromLTWH(8, 16, 184, 184)),
     );
 
-    // 内环细线：只是盘面内部的层次线，不承担外框作用。
+    final rim = Path();
+    _arcTo(rim, 92, _startDeg, end);
+    canvas.drawPath(
+      rim,
+      Paint()
+        ..color = const Color(0x605A6E85)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.2,
+    );
+    final rimHighlight = Path();
+    _arcTo(rimHighlight, 93, _startDeg + 9, end - 9);
+    canvas.drawPath(
+      rimHighlight,
+      Paint()
+        ..shader = const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0xA4C2D2E4), Color(0x08788DA6)],
+        ).createShader(Rect.fromCircle(center: _c, radius: 93))
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 0.7,
+    );
+
     final inner = Path();
     _arcTo(inner, 48, _startDeg, end);
     canvas.drawPath(
@@ -424,37 +490,24 @@ class _FanPainter extends CustomPainter {
       canvas.drawPath(
         maxArc,
         Paint()
-          ..color = maxColor.withValues(alpha: 0.5)
+          ..color = maxColor.withValues(alpha: 0.22)
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 7
+          ..strokeWidth = 4
           ..strokeCap = StrokeCap.round
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3),
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 1.8),
       );
       canvas.drawPath(
         maxArc,
         Paint()
           ..color = maxColor
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 4
+          ..strokeWidth = 2.6
           ..strokeCap = StrokeCap.round,
       );
       // 黄弧末端外侧标注 MAX
-      final tp = TextPainter(
-        text: const TextSpan(
-          text: 'MAX',
-          style: TextStyle(
-            color: maxColor,
-            fontSize: 7,
-            fontWeight: FontWeight.w800,
-            letterSpacing: 0.4,
-            shadows: [Shadow(color: Color(0xCC000000), blurRadius: 2)],
-          ),
-        ),
-        textAlign: TextAlign.center,
-        textDirection: TextDirection.ltr,
-      )..layout();
-      final lp = _polar(96, maxDeg);
-      tp.paint(canvas, Offset(lp.dx - tp.width / 2, lp.dy - tp.height / 2));
+      final avg = NeedleSpeedometer.markerProgress(avgSpeed);
+      final nearAvg = avg != null && (avg - maxProgress).abs() < 0.075;
+      _drawArcLabel(canvas, 'MAX', maxColor, maxDeg, nearAvg ? 117 : 104);
     }
 
     // 红色实时弧（顶层）：始终跟随当前速度，恢复原来的状态。
@@ -473,16 +526,16 @@ class _FanPainter extends CustomPainter {
         Paint()
           ..shader = shader
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 5
+          ..strokeWidth = 3.4
           ..strokeCap = StrokeCap.round
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3),
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 1.8),
       );
       canvas.drawPath(
         active,
         Paint()
           ..shader = shader
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 3
+          ..strokeWidth = 2.3
           ..strokeCap = StrokeCap.round,
       );
     }
@@ -500,11 +553,12 @@ class _FanPainter extends CustomPainter {
     final majorPaint = Paint()
       ..color = const Color(0xFFdbe8fb)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 2
+      ..strokeWidth = 1.5
       ..strokeCap = StrokeCap.round;
-    const textStyle = TextStyle(
-      color: Color(0xFFc4d6f2),
-      fontSize: 12.5,
+    final textStyle = TextStyle(
+      fontFamily: fontFamily,
+      color: const Color(0xFFC4D6F2),
+      fontSize: 11.5,
       fontWeight: FontWeight.w600,
     );
 
@@ -524,92 +578,74 @@ class _FanPainter extends CustomPainter {
           textAlign: TextAlign.center,
           textDirection: TextDirection.ltr,
         )..layout();
-        canvas.save();
-        canvas.translate(p.dx, p.dy);
-        canvas.rotate(deg * math.pi / 180);
-        tp.paint(canvas, Offset(-tp.width / 2, -tp.height / 2));
-        canvas.restore();
+        tp.paint(canvas, p - Offset(tp.width / 2, tp.height / 2));
       }
     }
   }
 
-  /* ---------------- AVG 标线（MAX 已改由底部黄色弧线表示） ---------------- */
-  void _drawMarkers(Canvas canvas) {
-    _drawOneMarker(
-      canvas,
-      value: avgSpeed,
-      label: 'AVG',
-      color: const Color(0xFF64D8FF),
-    );
-  }
+  void _drawAvgMarker(Canvas canvas) {
+    final avg = NeedleSpeedometer.markerProgress(avgSpeed);
+    if (avg == null) return;
 
-  void _drawOneMarker(
-    Canvas canvas, {
-    required double? value,
-    required String label,
-    required Color color,
-  }) {
-    final progress = NeedleSpeedometer.markerProgress(value);
-    if (progress == null) return;
-
-    final deg = _startDeg + _sweepDeg * progress;
+    const color = Color(0xFF65D8EF);
+    final deg = _startDeg + _sweepDeg * avg;
     final rad = deg * math.pi / 180;
-    final ux = math.sin(rad);
-    final uy = -math.cos(rad);
-    // 切线方向，用来让三角标线始终垂直于刻度弧。
-    final tx = math.cos(rad);
-    final ty = math.sin(rad);
-    Offset at(double r, double t) => Offset(
-          _c.dx + ux * r + tx * t,
-          _c.dy + uy * r + ty * t,
-        );
+    final tangent = Offset(math.cos(rad), math.sin(rad));
+    Offset at(double radius, double across) =>
+        _polar(radius, deg) + tangent * across;
 
-    // 尖端指向刻度（r≈84），底边贴着盘面外缘（r≈90.5）。
-    final apex = at(84.5, 0);
-    final baseA = at(90.5, 2.8);
-    final baseB = at(90.5, -2.8);
+    const rimRadius = 94.0;
+    final rimMarker = Path();
+    _arcTo(rimMarker, rimRadius, deg - 6, deg + 6);
+    canvas.drawPath(
+      rimMarker,
+      Paint()
+        ..color = color
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.15
+        ..strokeCap = StrokeCap.round,
+    );
     canvas.drawPath(
       Path()
-        ..moveTo(apex.dx, apex.dy)
-        ..lineTo(baseA.dx, baseA.dy)
-        ..lineTo(baseB.dx, baseB.dy)
-        ..close(),
+        ..addPolygon(
+            [at(rimRadius, -1.35), at(rimRadius, 1.35), at(71, 0)], true),
       Paint()..color = color,
     );
 
-    final tp = TextPainter(
-      text: TextSpan(
-        text: label,
-        style: TextStyle(
-          color: color,
-          fontSize: 7,
-          fontWeight: FontWeight.w800,
-          letterSpacing: 0.4,
-          shadows: const [Shadow(color: Color(0xCC000000), blurRadius: 2)],
-        ),
-      ),
-      textAlign: TextAlign.center,
-      textDirection: TextDirection.ltr,
-    )..layout();
-    final lp = _polar(96, deg);
-    tp.paint(canvas, Offset(lp.dx - tp.width / 2, lp.dy - tp.height / 2));
+    _drawArcLabel(canvas, 'AVG', color, deg, 100);
   }
 
-  void _drawUnitMark(Canvas canvas) {
-    final tp = TextPainter(
-      text: const TextSpan(
-        text: 'km/h',
-        style: TextStyle(
-          color: Color(0xFFd6e2f5),
-          fontSize: 9,
-          fontWeight: FontWeight.w600,
-          letterSpacing: 1.6,
+  void _drawArcLabel(
+    Canvas canvas,
+    String label,
+    Color color,
+    double deg,
+    double radius,
+  ) {
+    final upright = (deg + 90) % 180 - 90;
+    final direction = deg.abs() > 90 ? -1 : 1;
+    for (var i = 0; i < label.length; i++) {
+      final offset = (i - (label.length - 1) / 2) * 3.8 * direction;
+      final tp = TextPainter(
+        text: TextSpan(
+          text: label[i],
+          style: TextStyle(
+            color: color,
+            fontFamily: fontFamily,
+            fontSize: 8,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 0.4,
+          ),
         ),
-      ),
-      textAlign: TextAlign.center,
-      textDirection: TextDirection.ltr,
-    )..layout();
-    tp.paint(canvas, Offset(100 - tp.width / 2, 60));
+        textDirection: TextDirection.ltr,
+      )..layout();
+      final position = _polar(radius, deg + offset);
+      canvas.save();
+      canvas.translate(position.dx, position.dy);
+      canvas.rotate((upright + offset) * math.pi / 180);
+      tp.paint(canvas, Offset(-tp.width / 2, -tp.height / 2));
+      canvas.restore();
+    }
   }
 
   /* ---------------- 指针 + 轴心 ---------------- */
@@ -649,7 +685,8 @@ class _FanPainter extends CustomPainter {
     canvas.drawPath(
       body(),
       Paint()
-        ..shader = needleGradient.createShader(const Rect.fromLTWH(95, 28, 10, 86))
+        ..shader =
+            needleGradient.createShader(const Rect.fromLTWH(95, 28, 10, 86))
         ..style = PaintingStyle.fill,
     );
     canvas.restore();
@@ -696,6 +733,7 @@ class _FanPainter extends CustomPainter {
   bool shouldRepaint(covariant _FanPainter oldDelegate) =>
       oldDelegate.progress != progress ||
       oldDelegate.travel != travel ||
+      oldDelegate.fontFamily != fontFamily ||
       oldDelegate.avgSpeed != avgSpeed ||
       oldDelegate.peakSpeed != peakSpeed;
 }

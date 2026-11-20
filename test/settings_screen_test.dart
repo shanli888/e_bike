@@ -95,8 +95,8 @@ void main() {
     PackageInfo.setMockInitialValues(
       appName: '智能码表',
       packageName: 'com.wepower.bike_computer',
-      version: '1.6.57',
-      buildNumber: '68',
+      version: '1.6.67',
+      buildNumber: '78',
       buildSignature: '',
     );
     SharedPreferences.setMockInitialValues({});
@@ -110,28 +110,12 @@ void main() {
     await tester.tap(about);
     await tester.pumpAndSettle();
 
-    expect(find.text('1.6.57 (68)'), findsOneWidget);
-    expect(find.text('2026-11-16'), findsOneWidget);
+    expect(find.text('1.6.67 (78)'), findsOneWidget);
+    expect(find.text('2026-11-20'), findsOneWidget);
     expect(find.text('本次更新'), findsOneWidget);
     // 本次更新文案随版本变化，断言只锁定该段独有的关键词。
-    expect(find.textContaining('裁剪掉设计稿的空白边框'), findsOneWidget);
-    expect(find.textContaining('toast 反馈'), findsOneWidget);
-    expect(find.textContaining('电源按钮'), findsOneWidget);
-    expect(find.textContaining('数显管'), findsOneWidget);
-    expect(find.textContaining('连续调速'), findsOneWidget);
-    expect(find.textContaining('36V 电池重新标定'), findsOneWidget);
-    expect(find.textContaining('正红 #FF0000'), findsOneWidget);
-    expect(find.textContaining('24 秒一轮'), findsOneWidget);
-    expect(find.textContaining('单一连续填充条'), findsOneWidget);
-    expect(find.textContaining('屏幕常亮'), findsOneWidget);
-    expect(find.textContaining('来源图标上移'), findsOneWidget);
-    expect(find.textContaining('分级多色'), findsOneWidget);
-    expect(find.textContaining('偏热 / 过热'), findsOneWidget);
-    expect(find.textContaining('50~80% 蓝'), findsOneWidget);
-    expect(find.textContaining('DSEG7'), findsOneWidget);
-    expect(find.textContaining('熄灭段底纹'), findsOneWidget);
-    expect(find.textContaining('位数恒定'), findsOneWidget);
-    expect(find.textContaining('连接真实设备自动切回真实数据'), findsOneWidget);
-    expect(find.textContaining('闪控联动'), findsOneWidget);
+    expect(find.textContaining('七段速度读数'), findsOneWidget);
+    expect(find.textContaining('AVG 和 MAX 逐字沿弧排布'), findsOneWidget);
+    expect(find.textContaining('珊瑚色'), findsOneWidget);
   });
 }
