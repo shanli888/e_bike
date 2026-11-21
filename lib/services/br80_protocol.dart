@@ -17,6 +17,12 @@ class Br80KeyEvent {
   final bool known;
   final DateTime at;
 
+  int? get speedPageDirection => switch (code) {
+        0x07 => -1,
+        0x08 => 1,
+        _ => null,
+      };
+
   String get hex => '0x${code.toRadixString(16).toUpperCase().padLeft(2, '0')}';
 
   String get action => known ? (pressed ? '按下' : '抬起') : '未知事件';

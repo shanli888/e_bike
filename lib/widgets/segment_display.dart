@@ -213,6 +213,7 @@ class SegmentClock extends StatelessWidget {
     super.key,
     required this.text,
     required this.height,
+    this.colonLit = true,
     this.color = DashColors.segSub,
     this.ghostColor = DashColors.segGhost,
     this.glowColor = DashColors.segGlow,
@@ -221,6 +222,7 @@ class SegmentClock extends StatelessWidget {
 
   /// `HH:MM`；其它格式按无数据处理（只留熄灭底纹）。
   final String text;
+  final bool colonLit;
 
   /// 数字字号（逻辑像素），与副速度数码管保持一致。
   final double height;
@@ -238,14 +240,15 @@ class SegmentClock extends StatelessWidget {
     final hours = valid ? parts[0] : null;
     final minutes = valid ? parts[1] : null;
     final dot = height * 0.11;
+    final lit = valid && colonLit;
 
     Widget colonDot() => Container(
           width: dot,
           height: dot,
           decoration: BoxDecoration(
-            color: valid ? color : ghostColor,
+            color: lit ? color : ghostColor,
             shape: BoxShape.circle,
-            boxShadow: valid
+            boxShadow: lit
                 ? [BoxShadow(color: glowColor, blurRadius: height * 0.12)]
                 : null,
           ),

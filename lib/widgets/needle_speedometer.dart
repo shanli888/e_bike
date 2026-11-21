@@ -1,6 +1,6 @@
 import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart' show kReleaseMode;
+import 'package:flutter/foundation.dart' show ValueListenable, kReleaseMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
@@ -15,6 +15,7 @@ class NeedleSpeedometer extends StatefulWidget {
     this.size = 220,
     this.avgSpeed,
     this.peakSpeed,
+    this.showStartupSweep = false,
   });
 
   /// 当前速度（km/h）；null 表示无数据，指针停在起点。
@@ -26,6 +27,7 @@ class NeedleSpeedometer extends StatefulWidget {
   /// 最高速度标线（km/h）；null 或 0 表示不绘制。
   /// 不叫 maxSpeed 是为了避开量程常量 [NeedleSpeedometer.maxSpeed]。
   final double? peakSpeed;
+  final bool showStartupSweep;
 
   /// 速度来源：true=GPS，false=蓝牙（仅用于语义标签）。
   final bool useGps;
@@ -69,22 +71,31 @@ class NeedleSpeedometer extends StatefulWidget {
 class _NeedleSpeedometerState extends State<NeedleSpeedometer>
     with TickerProviderStateMixin {
   /// 指针平滑扫动（速度变化时）。
-  late final AnimationController _needleCtrl = AnimationController(
+  late final AnimationController _needleCtrl = AnimationController(vsync: this);
+  late final AnimationController _startupCtrl = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 900),
-  );
+    duration: const Duration(milliseconds: 3400),
+  )..addStatusListener((status) {
+      if (status == AnimationStatus.completed) {
+        _animateNeedleTo(NeedleSpeedometer.progressFor(widget.speed));
+      }
+    });
 
   /// 道路行程 0..1，由 Ticker 按车速推进（AnimationController 无 speed setter）。
-  double _travel = 0;
+  final _travel = ValueNotifier<double>(0);
   double? _lastElapsedMs;
   late final Ticker _roadTicker;
+  late final Listenable _repaint =
+      Listenable.merge([_needleCtrl, _startupCtrl, _travel]);
+  bool _reduceMotion = false;
+  bool _startupDecided = false;
 
   @override
   void initState() {
     super.initState();
     _needleCtrl.value = NeedleSpeedometer.progressFor(widget.speed);
     _roadTicker = createTicker((elapsed) {
-      final ms = elapsed.inMilliseconds.toDouble();
+      final ms = elapsed.inMicroseconds / 1000;
       final dt =
           _lastElapsedMs == null ? 0.0 : (ms - _lastElapsedMs!).clamp(0, 64);
       _lastElapsedMs = ms;
@@ -92,12 +103,29 @@ class _NeedleSpeedometerState extends State<NeedleSpeedometer>
       // 用平滑后的指针进度，起步/刹车时路面有自然的加减速。
       final ratio = _needleCtrl.value;
       final cyclesPerSec = NeedleSpeedometer.roadCyclesPerSec(ratio);
-      final next = (_travel + dt / 1000 * cyclesPerSec) % 1.0;
-      if (next != _travel && mounted) setState(() => _travel = next);
+      _travel.value = (_travel.value + dt / 1000 * cyclesPerSec) % 1.0;
     });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _reduceMotion = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+    if (!_startupDecided) {
+      _startupDecided = true;
+      if (widget.showStartupSweep && !_reduceMotion) {
+        _needleCtrl.value = 0;
+        _startupCtrl.forward();
+      }
+    }
+    if (_reduceMotion) {
+      _startupCtrl.stop();
+      _needleCtrl.value = NeedleSpeedometer.progressFor(widget.speed);
+      _roadTicker.stop();
+      _lastElapsedMs = null;
+    }
     // 道路是持续循环动效，仅在发布版真机运行；测试环境保持静止以免 pumpAndSettle 不收敛。
-    if (kReleaseMode &&
-        !(MediaQuery.maybeOf(context)?.disableAnimations ?? false)) {
+    if (kReleaseMode && !_reduceMotion && !_roadTicker.isActive) {
       _roadTicker.start();
     }
   }
@@ -105,19 +133,33 @@ class _NeedleSpeedometerState extends State<NeedleSpeedometer>
   @override
   void didUpdateWidget(covariant NeedleSpeedometer oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.speed != widget.speed) {
-      _needleCtrl.animateTo(
-        NeedleSpeedometer.progressFor(widget.speed),
-        curve: Curves.easeOutCubic,
-      );
-      // 道路速度在 ticker 内实时读取 widget.speed，无需额外处理。
+    final target = NeedleSpeedometer.progressFor(widget.speed);
+    if (_startupCtrl.isAnimating ||
+        target == NeedleSpeedometer.progressFor(oldWidget.speed)) {
+      return;
     }
+    if (_reduceMotion) {
+      _needleCtrl.value = target;
+      return;
+    }
+    _animateNeedleTo(target);
+  }
+
+  void _animateNeedleTo(double target) {
+    // 显式指定时长，让小幅变化也能跨多帧，并从当前显示位置继续转动。
+    _needleCtrl.animateTo(
+      target,
+      duration: const Duration(milliseconds: 440),
+      curve: Curves.easeOutSine,
+    );
   }
 
   @override
   void dispose() {
+    _startupCtrl.dispose();
     _needleCtrl.dispose();
     _roadTicker.dispose();
+    _travel.dispose();
     super.dispose();
   }
 
@@ -150,18 +192,19 @@ class _NeedleSpeedometerState extends State<NeedleSpeedometer>
         child: Stack(
           fit: StackFit.expand,
           children: [
-            AnimatedBuilder(
-              animation: _needleCtrl,
-              builder: (context, _) => CustomPaint(
+            RepaintBoundary(
+              child: CustomPaint(
                 painter: _FanPainter(
-                  progress: _needleCtrl.value,
+                  needle: _needleCtrl,
+                  startup: _startupCtrl,
                   fontFamily: fontFamily,
                   travel: _travel,
                   avgSpeed: widget.avgSpeed,
                   peakSpeed: widget.peakSpeed,
+                  repaint: _repaint,
                 ),
                 size: Size(w, h),
-                isComplex: true,
+                willChange: true,
               ),
             ),
             Positioned(
@@ -206,29 +249,58 @@ class _NeedleSpeedometerState extends State<NeedleSpeedometer>
 
 class _FanPainter extends CustomPainter {
   _FanPainter({
-    required this.progress,
+    required this.needle,
+    required this.startup,
     required this.travel,
     required this.fontFamily,
     this.avgSpeed,
     this.peakSpeed,
-  });
+    required Listenable repaint,
+  }) : super(repaint: repaint);
 
   /// 指针动画进度 0..1（当前速度）。
-  final double progress;
+  final Animation<double> needle;
+  final AnimationController startup;
+  static const _sweepSpacing = 0.30;
+  static const _sweepTravel = 1 + 2 * _sweepSpacing;
+  static const _sweepOut = Interval(0, 0.43, curve: Curves.easeInOutSine);
+  static const _sweepBack = Interval(0.53, 0.96, curve: Curves.easeInOutSine);
+
+  double _sweepProgress(int order) {
+    final time = startup.value;
+    final offset = order * _sweepSpacing;
+    // 共用一条行程，按满量程距离错开；每根指针在各自端点停住。
+    final out =
+        (_sweepOut.transform(time) * _sweepTravel - offset).clamp(0.0, 1.0);
+    final back =
+        (_sweepBack.transform(time) * _sweepTravel - offset).clamp(0.0, 1.0);
+    return out - back;
+  }
+
+  double get progress => startup.isAnimating ? _sweepProgress(0) : needle.value;
 
   /// 道路行程 0..1（循环），驱动横纹与中心虚线流动。
-  final double travel;
+  final ValueListenable<double> travel;
   final String? fontFamily;
 
   /// 平均 / 最高速度标线的原始值（km/h）。
   final double? avgSpeed;
   final double? peakSpeed;
+  double? get _avgProgress => startup.isAnimating
+      ? _sweepProgress(1)
+      : NeedleSpeedometer.markerProgress(avgSpeed);
+  double? get _maxProgress => startup.isAnimating
+      ? _sweepProgress(2)
+      : NeedleSpeedometer.markerProgress(peakSpeed);
 
   static const double _boxW = 200;
   static const Offset _c = Offset(100, 108);
 
   static const _startDeg = NeedleSpeedometer.startDeg;
   static const _sweepDeg = NeedleSpeedometer.sweepDeg;
+  static const _rimHighlightRadius = 93.0;
+  static const _avgColor = Color(0xFF65D8EF);
+  static const _maxColor = Color(0xFFFFC02E);
 
   static const _dialColors = [
     Color(0xFF16263D),
@@ -262,7 +334,7 @@ class _FanPainter extends CustomPainter {
     _drawCase(canvas);
     _drawArc(canvas);
     _drawTicks(canvas);
-    _drawAvgMarker(canvas);
+    _drawSpeedMarkers(canvas);
     _drawNeedle(canvas);
     _drawGlass(canvas);
 
@@ -351,7 +423,7 @@ class _FanPainter extends CustomPainter {
       const Offset(100, yNear),
       8,
       8,
-      (travel * 16) % 16,
+      (travel.value * 16) % 16,
       Paint()
         ..shader = const LinearGradient(
           begin: Alignment.topCenter,
@@ -372,7 +444,7 @@ class _FanPainter extends CustomPainter {
     // 6 条横纹：由远及近滚动，近处更宽更亮
     const count = 6;
     for (var i = 0; i < count; i++) {
-      final p = ((i / count) + travel) % 1;
+      final p = ((i / count) + travel.value) % 1;
       final y = yFar + (yNear - yFar) * p;
       final hw = wFar + (wNear - wFar) * p;
       final opacity = 0.17 * p;
@@ -434,7 +506,7 @@ class _FanPainter extends CustomPainter {
         ..strokeWidth = 1.2,
     );
     final rimHighlight = Path();
-    _arcTo(rimHighlight, 93, _startDeg + 9, end - 9);
+    _arcTo(rimHighlight, _rimHighlightRadius, _startDeg + 9, end - 9);
     canvas.drawPath(
       rimHighlight,
       Paint()
@@ -442,7 +514,7 @@ class _FanPainter extends CustomPainter {
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: [Color(0xA4C2D2E4), Color(0x08788DA6)],
-        ).createShader(Rect.fromCircle(center: _c, radius: 93))
+        ).createShader(Rect.fromCircle(center: _c, radius: _rimHighlightRadius))
         ..style = PaintingStyle.stroke
         ..strokeWidth = 0.7,
     );
@@ -461,6 +533,11 @@ class _FanPainter extends CustomPainter {
   /* ---------------- 发光弧 ---------------- */
   void _drawArc(Canvas canvas) {
     const r = 84.0;
+    const liveWidth = 2.3;
+    const avgRadius = r + 0.75;
+    const avgWidth = 4.1;
+    const maxInner = r - liveWidth / 2;
+    const maxOuter = avgRadius + avgWidth / 2;
     const end = _startDeg + _sweepDeg;
     final rect = Rect.fromCircle(center: _c, radius: r);
 
@@ -476,38 +553,29 @@ class _FanPainter extends CustomPainter {
         ..strokeCap = StrokeCap.round,
     );
 
-    // MAX 黄色弧（底层）：从起点画到本次最高速角度。红色实时弧会盖在它上面，
-    // 于是「当前速度 → 最高速」这一段露出来呈黄色，直观标出历史最高。
-    final maxProgress = NeedleSpeedometer.markerProgress(peakSpeed);
-    if (maxProgress != null) {
-      final maxDeg = _startDeg + _sweepDeg * maxProgress;
-      final maxArc = Path();
-      _arcTo(maxArc, r, _startDeg, maxDeg);
-      const maxColor = Color(0xFFFFC02E);
+    void drawTripArc(
+        double? progress, double radius, double width, Color color) {
+      if (progress == null || progress == 0) return;
+      final arc = Path();
+      _arcTo(arc, radius, _startDeg, _startDeg + _sweepDeg * progress);
       canvas.drawPath(
-        maxArc,
-        Paint()
-          ..color = maxColor.withValues(alpha: 0.22)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 4
-          ..strokeCap = StrokeCap.round
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 1.8),
-      );
-      canvas.drawPath(
-        maxArc,
-        Paint()
-          ..color = maxColor
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 2.6
-          ..strokeCap = StrokeCap.round,
-      );
-      // 黄弧末端外侧标注 MAX
-      final avg = NeedleSpeedometer.markerProgress(avgSpeed);
-      final nearAvg = avg != null && (avg - maxProgress).abs() < 0.075;
-      _drawArcLabel(canvas, 'MAX', maxColor, maxDeg, nearAvg ? 117 : 104);
+          arc,
+          Paint()
+            ..color = color
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = width
+            ..strokeCap = StrokeCap.round);
     }
 
-    // 红色实时弧（顶层）：始终跟随当前速度，恢复原来的状态。
+    drawTripArc(
+      _maxProgress,
+      (maxInner + maxOuter) / 2,
+      maxOuter - maxInner,
+      _maxColor,
+    );
+    drawTripArc(_avgProgress, avgRadius, avgWidth, _avgColor);
+
+    // 红色实时弧在顶层，始终跟随指针。
     final filled = _startDeg + _sweepDeg * progress;
     if (filled > _startDeg + 0.1) {
       final shader = const SweepGradient(
@@ -532,7 +600,7 @@ class _FanPainter extends CustomPainter {
         Paint()
           ..shader = shader
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 2.3
+          ..strokeWidth = liveWidth
           ..strokeCap = StrokeCap.round,
       );
     }
@@ -562,11 +630,11 @@ class _FanPainter extends CustomPainter {
     for (var i = 0; i <= steps; i++) {
       final deg = _startDeg + _sweepDeg * i / steps;
       final major = i % majorEvery == 0;
-      final inner = _polar(major ? 68 : 75, deg);
-      final outer = _polar(82, deg);
+      final inner = _polar(major ? 75 : 79, deg);
+      final outer = _polar(81, deg);
       canvas.drawLine(inner, outer, major ? majorPaint : minorPaint);
       if (major) {
-        final p = _polar(57, deg);
+        final p = _polar(64.5, deg);
         final tp = TextPainter(
           text: TextSpan(
             text: (NeedleSpeedometer.maxSpeed * i / steps).round().toString(),
@@ -580,36 +648,48 @@ class _FanPainter extends CustomPainter {
     }
   }
 
-  void _drawAvgMarker(Canvas canvas) {
-    final avg = NeedleSpeedometer.markerProgress(avgSpeed);
-    if (avg == null) return;
+  void _drawSpeedMarkers(Canvas canvas) {
+    final avg = _avgProgress;
+    final max = _maxProgress;
+    if (avg != null) {
+      final deg = _startDeg + _sweepDeg * avg;
+      _drawSpeedMarker(canvas, deg, _avgColor);
+      _drawArcLabel(canvas, 'AVG', _avgColor, deg, 101);
+    }
+    if (max != null) {
+      final deg = _startDeg + _sweepDeg * max;
+      _drawSpeedMarker(canvas, deg, _maxColor);
+      final nearAvg = avg != null && (avg - max).abs() < 0.06;
+      if (!nearAvg) _drawArcLabel(canvas, 'MAX', _maxColor, deg, 101);
+    }
+  }
 
-    const color = Color(0xFF65D8EF);
-    final deg = _startDeg + _sweepDeg * avg;
-    final rad = deg * math.pi / 180;
-    final tangent = Offset(math.cos(rad), math.sin(rad));
-    Offset at(double radius, double across) =>
-        _polar(radius, deg) + tangent * across;
-
-    const rimRadius = 94.0;
-    final rimMarker = Path();
-    _arcTo(rimMarker, rimRadius, deg - 6, deg + 6);
-    canvas.drawPath(
-      rimMarker,
-      Paint()
-        ..color = color
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.15
-        ..strokeCap = StrokeCap.round,
-    );
-    canvas.drawPath(
-      Path()
-        ..addPolygon(
-            [at(rimRadius, -1.35), at(rimRadius, 1.35), at(71, 0)], true),
-      Paint()..color = color,
-    );
-
-    _drawArcLabel(canvas, 'AVG', color, deg, 100);
+  void _drawSpeedMarker(Canvas canvas, double deg, Color color) {
+    // 局部纵轴朝向圆心，外侧弧边比表盘高光稍向外伸出。
+    final outer = _polar(_rimHighlightRadius, deg);
+    const outerRadius = _rimHighlightRadius + 1;
+    const halfWidth = 14.0;
+    final halfAngle = math.asin(halfWidth / outerRadius);
+    final edgeDepth = _rimHighlightRadius - outerRadius * math.cos(halfAngle);
+    final marker = Path()
+      ..addArc(
+        Rect.fromCircle(
+          center: const Offset(0, _rimHighlightRadius),
+          radius: outerRadius,
+        ),
+        -math.pi / 2 - halfAngle,
+        2 * halfAngle,
+      )
+      ..cubicTo(halfWidth, 3, 11.5, 3.5, 7.5, 3.5)
+      ..cubicTo(3.6, 3.5, 0.9, 5.2, 0, 8.5)
+      ..cubicTo(-0.9, 5.2, -3.6, 3.5, -7.5, 3.5)
+      ..cubicTo(-11.5, 3.5, -halfWidth, 3, -halfWidth, edgeDepth)
+      ..close();
+    canvas.save();
+    canvas.translate(outer.dx, outer.dy);
+    canvas.rotate(deg * math.pi / 180);
+    canvas.drawPath(marker, Paint()..color = color);
+    canvas.restore();
   }
 
   void _drawArcLabel(
@@ -728,7 +808,7 @@ class _FanPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _FanPainter oldDelegate) =>
-      oldDelegate.progress != progress ||
+      oldDelegate.needle != needle ||
       oldDelegate.travel != travel ||
       oldDelegate.fontFamily != fontFamily ||
       oldDelegate.avgSpeed != avgSpeed ||

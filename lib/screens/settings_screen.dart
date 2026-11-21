@@ -337,6 +337,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   /// 设备信息
   Widget _buildDeviceInfo(BleService ble, DeviceSettings settings) {
+    final deviceTrip = ble.bikeData.deviceTripDistance;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -373,6 +374,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
               settings.motorType.isNotEmpty ? settings.motorType : '--'),
           _buildDivider(),
           _buildInfoLine('速度限制', '--（未读取）'),
+          _buildDivider(),
+          _buildInfoLine(
+            '设备上报里程',
+            deviceTrip == null
+                ? '--（未读取）'
+                : '${deviceTrip.toStringAsFixed(3)} km',
+          ),
         ],
       ),
     );

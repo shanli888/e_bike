@@ -226,6 +226,7 @@ class BleService extends ChangeNotifier {
 
   // 骑行数据
   final BikeData _bikeData = BikeData();
+  final Stopwatch _speedClock = Stopwatch()..start();
   static const Duration _lvbuVoltageFreshness = Duration(seconds: 45);
 
   void _clearLvbuVoltage() {
@@ -1057,17 +1058,6 @@ class BleService extends ChangeNotifier {
     // 简化: 假设数据直接按固定偏移解析
     try {
       // 根据常见协议解析（需根据实际硬件调整）
-      if (payload.length >= 8) {
-        _bikeData.speed = _bytesToUint16(payload, 0) / 10.0; // km/h
-        _bikeData.avgSpeed = _bytesToUint16(payload, 2) / 10.0;
-        _bikeData.maxSpeed = _bytesToUint16(payload, 4) / 10.0;
-      }
-
-      if (payload.length >= 12) {
-        _bikeData.tripDistance = _bytesToUint16(payload, 9) / 10.0; // km
-        _bikeData.totalDistance = _bytesToUint32(payload, 11) / 1000.0;
-      }
-
       if (payload.length >= 16) {
         _bikeData.batteryLevel = payload[15] & 0xFF; // %
         _bikeData.assistLevel = payload[16] & 0x07; // 0-5
@@ -1132,17 +1122,15 @@ class BleService extends ChangeNotifier {
           if (dTime > 100 && dTime < 10240 && dRev < 500) {
             final seconds = dTime / 1024.0;
             final speedKmh = (dRev * circumferenceM) / seconds * 3.6;
-            if (speedKmh >= 0 && speedKmh < 150) {
-              _bikeData.speed = speedKmh;
-              _bikeData.speedAvailable = true;
-              if (speedKmh > _bikeData.maxSpeed) _bikeData.maxSpeed = speedKmh;
+            // 有有效的 LVBU 实时速度时，以该来源为准，避免重复累计。
+            if (speedKmh >= 0 &&
+                speedKmh < 150 &&
+                !_lvbuLastSuccess.containsKey(LvbuReadCommand.speed)) {
+              _bikeData.recordBluetoothSpeed(speedKmh, _speedClock.elapsed,
+                  measurementInterval: Duration(
+                      microseconds: (seconds * Duration.microsecondsPerSecond)
+                          .round()));
             }
-            // 累计里程
-            final km = dRev * circumferenceM / 1000.0;
-            _bikeData.tripDistance += km;
-            _bikeData.tripAvailable = true;
-            _bikeData.totalDistance += km;
-            _bikeData.totalDistanceAvailable = true;
           }
         }
 
@@ -1802,7 +1790,6 @@ class BleService extends ChangeNotifier {
       }
       for (final command in [
         LvbuReadCommand.temperature,
-        LvbuReadCommand.trip,
         LvbuReadCommand.gyro,
         LvbuReadCommand.climbing
       ]) {
@@ -1811,8 +1798,6 @@ class BleService extends ChangeNotifier {
         switch (command) {
           case LvbuReadCommand.temperature:
             _bikeData.temperatureAvailable = false;
-          case LvbuReadCommand.trip:
-            _bikeData.tripAvailable = false;
           case LvbuReadCommand.gyro:
             _bikeData.gyroAngleAvailable = false;
           case LvbuReadCommand.climbing:
@@ -1915,19 +1900,13 @@ class BleService extends ChangeNotifier {
           _bikeData.batteryLevelEstimated = true;
         }
       case LvbuReadCommand.speed:
-        _bikeData.speed = reply.value!;
-        _bikeData.speedAvailable = true;
+        _bikeData.recordBluetoothSpeed(reply.value!, _speedClock.elapsed,
+            measurementInterval: first ? Duration.zero : null);
       case LvbuReadCommand.temperature:
         _bikeData.controllerTemperature = reply.value!;
         _bikeData.temperatureAvailable = true;
       case LvbuReadCommand.trip:
-        _bikeData.tripDistance = reply.tripDistanceKm!;
-        _bikeData.rideTime = reply.tripTimeSeconds!;
-        _bikeData.maxSpeed = reply.tripMaxSpeed!;
-        _bikeData.avgSpeed = reply.tripTimeSeconds! > 0
-            ? reply.tripDistanceKm! * 3600 / reply.tripTimeSeconds!
-            : 0;
-        _bikeData.tripAvailable = true;
+        _bikeData.deviceTripDistance = reply.tripDistanceKm;
       case LvbuReadCommand.gyro:
         _bikeData.slope = reply.value!;
         _bikeData.gyroAngleAvailable = true;
@@ -2684,7 +2663,6 @@ int _u32(List<int> bytes, int offset) {
 
 int _bytesToUint16(List<int> bytes, int offset) => _u16(bytes, offset);
 
-int _bytesToUint32(List<int> bytes, int offset) => _u32(bytes, offset);
 
 int _bytesToInt16(List<int> bytes, int offset) {
   var val = _u16(bytes, offset);

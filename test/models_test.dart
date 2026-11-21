@@ -62,6 +62,39 @@ void main() {
       expect(data.speed, 0);
       expect(data.rssi, -100);
     });
+
+    test('蓝牙行程按实时速度积分，设备里程独立保存', () {
+      final data = BikeData(deviceTripDistance: 99);
+      data.recordBluetoothSpeed(18, Duration.zero);
+      data.recordBluetoothSpeed(36, const Duration(seconds: 2));
+      data.recordBluetoothSpeed(0, const Duration(seconds: 4));
+      data.recordBluetoothSpeed(0, const Duration(seconds: 6));
+      data.recordBluetoothSpeed(25, const Duration(seconds: 30));
+
+      expect(data.speed, 25);
+      expect(data.maxSpeed, 36);
+      expect(data.avgSpeed, closeTo(22.5, 0.00001));
+      expect(data.tripDistance, closeTo(0.025, 0.00001));
+      expect(data.deviceTripDistance, 99);
+      expect(data.tripAvailable, isTrue);
+      expect(BikeData.fromRawData(data.toJson()).deviceTripDistance, 99);
+
+      data.clearReadOnlyAvailability();
+      data.recordBluetoothSpeed(10, const Duration(seconds: 31));
+      expect(data.avgSpeed, 0);
+      expect(data.maxSpeed, 10);
+      expect(data.tripDistance, 0);
+      expect(data.deviceTripDistance, isNull);
+    });
+
+    test('CSC 使用轮圈事件的实际采样间隔计算里程', () {
+      final data = BikeData();
+      data.recordBluetoothSpeed(36, const Duration(seconds: 3),
+          measurementInterval: const Duration(seconds: 2));
+      expect(data.avgSpeed, closeTo(36, 0.00001));
+      expect(data.tripDistance, closeTo(0.02, 0.00001));
+      expect(data.deviceTripDistance, isNull);
+    });
   });
 
   test('未连接时默认显示手动模式，但不会被当作设备已确认状态', () {

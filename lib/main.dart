@@ -152,6 +152,7 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   int _index = 0;
+  bool _showStartupSweep = true;
 
   /// 状态栏骑行时间数码管的数字高度：比首页那一行小一号，与状态栏字号相称。
   static const double _appBarSegmentHeight = 18.0;
@@ -217,7 +218,10 @@ class _MainScreenState extends State<MainScreen> {
 
   void _goTo(int index) {
     if (index == _index) return;
-    setState(() => _index = index);
+    setState(() {
+      if (_index == 0) _showStartupSweep = false;
+      _index = index;
+    });
   }
 
   /// 规格 §2.2：单行标题栏，左侧「连接状态」，右侧「骑行时间／设置」。
@@ -256,11 +260,17 @@ class _MainScreenState extends State<MainScreen> {
             text: DemoRideData.rideTime,
             height: _appBarSegmentHeight,
           )
-        : Selector<RideTimeService, String>(
-            selector: (_, service) => service.display,
-            builder: (_, text, __) => SegmentClock(
+        : Selector<RideTimeService, (String, bool)>(
+            selector: (context, service) => (
+              service.display,
+              !service.running ||
+                  MediaQuery.disableAnimationsOf(context) ||
+                  service.elapsed.inSeconds.isOdd,
+            ),
+            builder: (_, clockState, __) => SegmentClock(
               key: const ValueKey('appbar-ride-time'),
-              text: text,
+              text: clockState.$1,
+              colonLit: clockState.$2,
               height: _appBarSegmentHeight,
             ),
           );
@@ -329,7 +339,10 @@ class _MainScreenState extends State<MainScreen> {
         ],
       ),
       body: switch (_index) {
-        0 => DashboardScreen(onOpenDevices: () => _goTo(1)),
+        0 => DashboardScreen(
+            onOpenDevices: () => _goTo(1),
+            showStartupSweep: _showStartupSweep,
+          ),
         1 => const DeviceScreen(),
         _ => const SettingsScreen(),
       },

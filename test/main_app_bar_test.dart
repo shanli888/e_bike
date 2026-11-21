@@ -4,6 +4,7 @@ import 'package:bike_computer/models/bike_data.dart';
 import 'package:bike_computer/services/assist_remote_scheduler.dart';
 import 'package:bike_computer/services/assist_step_settings.dart';
 import 'package:bike_computer/services/ble_service.dart';
+import 'package:bike_computer/services/br80_protocol.dart';
 import 'package:bike_computer/services/br80_service.dart';
 import 'package:bike_computer/services/demo_mode_settings.dart';
 import 'package:bike_computer/services/gps_service.dart';
@@ -210,19 +211,28 @@ void main() {
 
     final t0 = DateTime(2026, 11, 16, 10);
     rideTime.tick(t0);
-    for (var i = 1; i <= 65; i++) {
+    rideTime.tick(t0.add(const Duration(seconds: 1)));
+    await tester.pump();
+    expect(_appBarClock(tester).colonLit, isTrue);
+    rideTime.tick(t0.add(const Duration(seconds: 2)));
+    await tester.pump();
+    expect(_appBarClock(tester).text, '00:00');
+    expect(_appBarClock(tester).colonLit, isFalse);
+    for (var i = 3; i <= 66; i++) {
       rideTime.tick(t0.add(Duration(seconds: i)));
     }
     await tester.pump();
     expect(_appBarClock(tester).text, '00:01');
+    expect(_appBarClock(tester).colonLit, isFalse);
 
     // 速度归零后自动暂停
     speed = 0;
-    for (var i = 66; i <= 130; i++) {
+    for (var i = 67; i <= 130; i++) {
       rideTime.tick(t0.add(Duration(seconds: i)));
     }
     await tester.pump();
     expect(_appBarClock(tester).text, '00:01');
+    expect(_appBarClock(tester).colonLit, isTrue);
 
     rideTime.dispose();
   });
@@ -314,6 +324,9 @@ class _FakeRemote extends ChangeNotifier implements Br80Service {
 
   @override
   String? get message => null;
+
+  @override
+  Br80KeyEvent? get lastPressedKey => null;
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);

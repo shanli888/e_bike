@@ -6,6 +6,7 @@ import 'package:bike_computer/screens/dashboard_screen.dart';
 import 'package:bike_computer/services/assist_remote_scheduler.dart';
 import 'package:bike_computer/services/assist_step_settings.dart';
 import 'package:bike_computer/services/ble_service.dart';
+import 'package:bike_computer/services/br80_protocol.dart';
 import 'package:bike_computer/services/br80_service.dart';
 import 'package:bike_computer/services/demo_mode_settings.dart';
 import 'package:bike_computer/services/gps_service.dart';
@@ -137,6 +138,9 @@ class _FakeRemote extends ChangeNotifier implements Br80Service {
 
   @override
   String? get message => null;
+
+  @override
+  Br80KeyEvent? get lastPressedKey => null;
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
@@ -1335,12 +1339,45 @@ void main() {
             .opacity,
         1.0);
 
-    // 向右滑：切回表盘
+    // 连续向左滑也能绕回表盘。
+    await tester.drag(gauge, const Offset(-160, 0));
+    await tester.pumpAndSettle();
+    expect(tester.widget<AnimatedOpacity>(gauge).opacity, 1.0);
+
+    await tester.drag(gauge, const Offset(160, 0));
+    await tester.pumpAndSettle();
+    expect(tester.widget<AnimatedOpacity>(gauge).opacity, 0.0);
+
     await tester.drag(gauge, const Offset(160, 0));
     await tester.pumpAndSettle();
     expect(tester.widget<AnimatedOpacity>(gauge).opacity, 1.0);
 
     await tester.pumpWidget(const SizedBox.shrink());
     connected.dispose();
+  });
+
+  testWidgets('闪控左右键按下循环切换码表，抬起不翻页', (tester) async {
+    final remote = Br80Service(onAssistStep: (_) async {});
+    await tester.pumpWidget(
+        _wrap(_screen(), BleService(), GpsService(), remote: remote));
+
+    final gauge = find.byKey(const ValueKey('speed-gauge-page'));
+    double opacity() => tester.widget<AnimatedOpacity>(gauge).opacity;
+    expect(opacity(), 1);
+
+    for (final code in [0x07, 0x08]) {
+      remote.handleKeyFrame([code]);
+      await tester.pump();
+      expect(opacity(), 0);
+      remote.handleKeyFrame([code + 0x20]);
+      await tester.pump();
+      expect(opacity(), 0);
+      remote.handleKeyFrame([code]);
+      await tester.pump();
+      expect(opacity(), 1);
+    }
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    remote.dispose();
   });
 }

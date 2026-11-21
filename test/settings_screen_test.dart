@@ -23,6 +23,19 @@ Widget _wrap(AssistStepSettings steps,
     );
 
 void main() {
+  testWidgets('设备详情显示控制器上报的里程', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final ble = BleService();
+    ble.bikeData
+      ..tripDistance = 4.2
+      ..deviceTripDistance = 12.345;
+    await tester.pumpWidget(_wrap(AssistStepSettings(), ble: ble));
+    await tester.ensureVisible(find.text('设备上报里程', skipOffstage: false));
+    await tester.pumpAndSettle();
+    expect(find.text('12.345 km'), findsOneWidget);
+    expect(find.text('4.2 km'), findsNothing);
+  });
+
   testWidgets('本地轮径可选择并保存，重启和校准保持禁用', (tester) async {
     SharedPreferences.setMockInitialValues({});
     final ble = BleService();

@@ -12,6 +12,7 @@ import '../services/assist_remote_scheduler.dart';
 import '../services/assist_step_action.dart';
 import '../services/assist_step_settings.dart';
 import '../services/ble_service.dart';
+import '../services/br80_protocol.dart';
 import '../services/br80_service.dart';
 import '../services/demo_mode_settings.dart';
 import '../services/gps_service.dart';
@@ -40,7 +41,14 @@ class SlopeBar {
 /// （390×844 一屏无滚动，§1.2 分区表 / §1.4 配色 / §2 坐标 / §4 数字规则）。
 /// 骑行时间、副速度对比、可配置步进、闪控联动等既有功能全部保留。
 class DashboardScreen extends StatefulWidget {
-  const DashboardScreen({super.key, this.onOpenDevices, this.demoClock});
+  const DashboardScreen({
+    super.key,
+    this.onOpenDevices,
+    this.demoClock,
+    this.showStartupSweep = false,
+  });
+
+  final bool showStartupSweep;
 
   /// 未连接时点「去连接」跳到设备页（由外层底部导航切换）
   final VoidCallback? onOpenDevices;
@@ -57,6 +65,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   /// 速度区当前页：0=指针表盘（默认），1=数码管数字。左右滑动切换。
   int _speedPage = 0;
+  late final Br80Service _remote;
+  Br80KeyEvent? _handledRemotePress;
+  ModalRoute<dynamic>? _route;
 
   /// 速度区本次横向拖动累计位移，用于松手时判断切换方向（比甩动速度更稳）。
   double _speedDragDx = 0;
@@ -85,6 +96,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
+    _remote = context.read<Br80Service>();
+    _handledRemotePress = _remote.lastPressedKey;
+    _remote.addListener(_onRemoteChanged);
     _refreshTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
       if (mounted) setState(() {});
     });
@@ -101,9 +115,30 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _route = ModalRoute.of(context);
+  }
+
+  @override
   void dispose() {
+    _remote.removeListener(_onRemoteChanged);
     _refreshTimer?.cancel();
     super.dispose();
+  }
+
+  void _onRemoteChanged() {
+    final press = _remote.lastPressedKey;
+    if (identical(press, _handledRemotePress)) return;
+    _handledRemotePress = press;
+    final direction = press?.speedPageDirection;
+    if (direction != null && _route?.isCurrent != false) {
+      _changeSpeedPage(direction);
+    }
+  }
+
+  void _changeSpeedPage(int direction) {
+    setState(() => _speedPage = (_speedPage + direction) % 2);
   }
 
   @override
@@ -132,6 +167,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   // 数字页保持原样。widget 仍在树中（高度归零 + 裁剪），既有断言不受影响。
                   _buildSubTable(ble, gps, data, scale, demo,
                       collapsed: _speedPage == 0),
+                  _buildSpeedPageIndicator(scale),
                   _buildAssistCard(ble, scale, demo),
                   _buildSensorRow(data, scale),
                   _buildVersionLine(scale),
@@ -159,7 +195,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   ///
   /// 两视图始终 Stack 叠加在各自的原位置，仅切换透明度：这样数码管视图的
   /// key / 布局坐标保持不变（既有测试与无障碍读取不受影响），同时默认呈现
-  /// 用户选定的仿真指针表盘。向右滑回表盘、向左滑到数字。
+  /// 用户选定的仿真指针表盘。左右滑动或按闪控左右键均可循环切换。
   Widget _buildSpeedHero(
       BleService ble, GpsService gps, BikeData data, double s, bool demo) {
     final useGps = gps.source == SpeedSource.gps;
@@ -175,7 +211,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             : (gps.speedKmh?.toStringAsFixed(1) ?? '--'));
 
     // 表盘标线与副表采用同一套来源逻辑：演示模式固定演示 AVG/MAX；
-    // 真实模式 GPS 取 GPS 统计，蓝牙取设备上报（无 trip 数据时视作无效）。
+    // 真实模式采用对应速度来源的本地统计。
     final markerUseGps = !demo && gps.source == SpeedSource.gps;
     final avgMark = demo
         ? DemoRideData.avgSpeedKmh
@@ -200,11 +236,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
         onHorizontalDragStart: (_) => _speedDragDx = 0,
         onHorizontalDragUpdate: (details) => _speedDragDx += details.delta.dx,
         onHorizontalDragEnd: (_) {
-          // 左滑（累计负位移）看数字，右滑看表盘；位移过小则不切换，避免误触。
-          if (_speedDragDx < -40 && _speedPage == 0) {
-            setState(() => _speedPage = 1);
-          } else if (_speedDragDx > 40 && _speedPage == 1) {
-            setState(() => _speedPage = 0);
+          // 手势方向与翻页方向相反；位移过小则不切换。
+          if (_speedDragDx.abs() > 40) {
+            _changeSpeedPage(_speedDragDx < 0 ? 1 : -1);
           }
           _speedDragDx = 0;
         },
@@ -233,6 +267,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       useGps: useGps,
                       avgSpeed: avgMark,
                       peakSpeed: maxMark,
+                      showStartupSweep: widget.showStartupSweep,
                       size: 420 * s,
                     ),
                   ),
@@ -257,20 +292,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
                 ),
               ),
-            // 页指示：两个小点提示可左右滑动。
-            Positioned(
-              left: 0,
-              right: 0,
-              top: 8 * s,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  _pageDot(active: showGauge, s: s),
-                  SizedBox(width: 6 * s),
-                  _pageDot(active: !showGauge, s: s),
-                ],
-              ),
-            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSpeedPageIndicator(double s) {
+    final showGauge = _speedPage == 0;
+    return Semantics(
+      label: showGauge ? '当前为仪表盘码表' : '当前为数字码表',
+      child: SizedBox(
+        key: const ValueKey('speed-page-indicator'),
+        height: 16 * s,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            _pageDot(active: showGauge, s: s),
+            SizedBox(width: 6 * s),
+            _pageDot(active: !showGauge, s: s),
           ],
         ),
       ),
@@ -518,7 +558,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         .clamp(0.0, kMinInteractiveDimension);
     return Container(
       height: 212 * s + sliderExtra,
-      margin: EdgeInsets.fromLTRB(16 * s, 16 * s, 16 * s, 0),
+      margin: EdgeInsets.symmetric(horizontal: 16 * s),
       decoration: BoxDecoration(
         gradient: DashColors.assistBorder,
         borderRadius: BorderRadius.circular(16 * s),

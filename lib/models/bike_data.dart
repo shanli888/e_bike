@@ -22,9 +22,13 @@ class BikeData {
   /// 总里程 (km)
   double totalDistance;
 
-  /// 本次骑行里程 (km)
+  /// 手机根据蓝牙实时速度计算的本次骑行里程 (km)。
   double tripDistance;
   bool tripAvailable;
+  /// 设备只读行程查询返回的里程 (km)，供设置页查看。
+  double? deviceTripDistance;
+  Duration? _lastSpeedSample;
+  double _movingHours = 0;
   bool totalDistanceAvailable;
   bool gyroAngleAvailable;
   bool temperatureAvailable;
@@ -73,6 +77,7 @@ class BikeData {
     this.totalDistance = 0,
     this.tripDistance = 0,
     this.tripAvailable = false,
+    this.deviceTripDistance,
     this.totalDistanceAvailable = false,
     this.gyroAngleAvailable = false,
     this.temperatureAvailable = false,
@@ -104,6 +109,7 @@ class BikeData {
       totalDistance: (data['totalDistance'] ?? 0).toDouble(),
       tripDistance: (data['tripDistance'] ?? 0).toDouble(),
       tripAvailable: data['tripAvailable'] as bool? ?? false,
+      deviceTripDistance: (data['deviceTripDistance'] as num?)?.toDouble(),
       totalDistanceAvailable: data['totalDistanceAvailable'] as bool? ?? false,
       gyroAngleAvailable: data['gyroAngleAvailable'] as bool? ?? false,
       temperatureAvailable: data['temperatureAvailable'] as bool? ?? false,
@@ -133,6 +139,7 @@ class BikeData {
     'totalDistance': totalDistance,
     'tripDistance': tripDistance,
     'tripAvailable': tripAvailable,
+    'deviceTripDistance': deviceTripDistance,
     'totalDistanceAvailable': totalDistanceAvailable,
     'gyroAngleAvailable': gyroAngleAvailable,
     'temperatureAvailable': temperatureAvailable,
@@ -150,13 +157,42 @@ class BikeData {
     'rideTime': rideTime,
   };
 
+  /// 仅在收到新的速度样本时更新行程，忽略断流期间的距离。
+  void recordBluetoothSpeed(double kmh, Duration timestamp,
+      {Duration? measurementInterval}) {
+    if (!kmh.isFinite || kmh < 0) return;
+    final previous = _lastSpeedSample;
+    final interval = measurementInterval ??
+        (previous == null ? Duration.zero : timestamp - previous);
+    final intervalSpeed = measurementInterval == null ? (speed + kmh) / 2 : kmh;
+    if (interval > Duration.zero &&
+        interval < const Duration(seconds: 10) &&
+        intervalSpeed > 0) {
+      final hours = interval.inMicroseconds / Duration.microsecondsPerHour;
+      _movingHours += hours;
+      tripDistance += intervalSpeed * hours;
+      avgSpeed = tripDistance / _movingHours;
+    }
+    _lastSpeedSample = timestamp;
+    speed = kmh;
+    speedAvailable = true;
+    tripAvailable = true;
+    if (kmh > maxSpeed) maxSpeed = kmh;
+  }
+
   /// 清除 BLE 数据有效标记，避免重连后显示上一台设备的值。
   void clearReadOnlyAvailability() {
     voltage = 0;
     batteryLevelAvailable = false;
     batteryLevelEstimated = false;
     speedAvailable = false;
+    _lastSpeedSample = null;
+    _movingHours = 0;
+    avgSpeed = 0;
+    maxSpeed = 0;
+    tripDistance = 0;
     tripAvailable = false;
+    deviceTripDistance = null;
     totalDistanceAvailable = false;
     temperatureAvailable = false;
     gyroAngleAvailable = false;
