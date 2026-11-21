@@ -2,6 +2,7 @@ import 'package:bike_computer/screens/settings_screen.dart';
 import 'package:bike_computer/services/assist_step_settings.dart';
 import 'package:bike_computer/services/ble_service.dart';
 import 'package:bike_computer/services/demo_mode_settings.dart';
+import 'package:bike_computer/services/display_mode_settings.dart';
 import 'package:bike_computer/services/gps_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -18,6 +19,8 @@ Widget _wrap(AssistStepSettings steps,
         ChangeNotifierProvider<AssistStepSettings>.value(value: steps),
         ChangeNotifierProvider<DemoModeSettings>(
             create: (_) => demo ?? DemoModeSettings()),
+        ChangeNotifierProvider<DisplayModeSettings>(
+            create: (_) => DisplayModeSettings()),
       ],
       child: const MaterialApp(home: Scaffold(body: SettingsScreen())),
     );

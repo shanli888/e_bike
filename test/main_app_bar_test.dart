@@ -7,7 +7,10 @@ import 'package:bike_computer/services/ble_service.dart';
 import 'package:bike_computer/services/br80_protocol.dart';
 import 'package:bike_computer/services/br80_service.dart';
 import 'package:bike_computer/services/demo_mode_settings.dart';
+import 'package:bike_computer/services/display_mode_settings.dart';
 import 'package:bike_computer/services/gps_service.dart';
+import 'package:bike_computer/services/ride_recorder.dart';
+import 'package:bike_computer/services/ride_repository.dart';
 import 'package:bike_computer/services/ride_time_service.dart';
 import 'package:bike_computer/theme/dashboard_theme.dart';
 import 'package:bike_computer/widgets/remote_glyph.dart';
@@ -86,6 +89,11 @@ Widget _app(BleService ble,
           ChangeNotifierProvider<RideTimeService>(
               create: (ctx) =>
                   RideTimeService.fromServices(ble, ctx.read<GpsService>())),
+        ChangeNotifierProvider<DisplayModeSettings>(
+            create: (_) => DisplayModeSettings()),
+        Provider<RideRepository>(create: (_) => RideRepository()),
+        ChangeNotifierProvider<RideRecorder>(
+            create: (ctx) => RideRecorder(ctx.read<RideRepository>())),
       ],
       child: const BikeComputerApp(),
     );

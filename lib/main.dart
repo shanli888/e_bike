@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 
 import 'screens/dashboard_screen.dart';
 import 'screens/device_screen.dart';
+import 'screens/ride_history_screen.dart';
 import 'screens/settings_screen.dart';
 import 'models/demo_ride_data.dart';
 import 'services/assist_remote_scheduler.dart';
@@ -13,12 +14,16 @@ import 'services/assist_step_settings.dart';
 import 'services/ble_service.dart';
 import 'services/br80_service.dart';
 import 'services/demo_mode_settings.dart';
+import 'services/display_mode_settings.dart';
 import 'services/gps_service.dart';
+import 'services/ride_recorder.dart';
+import 'services/ride_repository.dart';
 import 'services/ride_time_service.dart';
 import 'services/screen_wake_lock.dart';
 import 'theme/dashboard_theme.dart';
 import 'widgets/app_dialogs.dart';
 import 'widgets/display_settings_sheet.dart';
+import 'widgets/ride_summary_sheet.dart';
 import 'widgets/remote_glyph.dart';
 import 'widgets/segment_display.dart';
 
@@ -67,6 +72,12 @@ Future<void> main() async {
   final gpsService = GpsService();
   gpsService.load();
 
+  // 骑行记录：本地文件仓库 + 记录状态机 + 显示形态设置
+  final rideRepository = RideRepository();
+  final rideRecorder = RideRecorder(rideRepository);
+  final displayMode = DisplayModeSettings();
+  await displayMode.load();
+
   // 连接控制器或 BR80 闪控后保持屏幕常亮，全部断开后恢复系统自动熄屏。
   // 两个服务都是 ChangeNotifier，连接/掉线都会通知；setConnected 内部去重。
   final screenWakeLock = ScreenWakeLock();
@@ -89,6 +100,9 @@ Future<void> main() async {
         ChangeNotifierProvider.value(value: gpsService),
         ChangeNotifierProvider<AssistStepSettings>.value(value: stepSettings),
         ChangeNotifierProvider<DemoModeSettings>.value(value: demoSettings),
+        ChangeNotifierProvider<DisplayModeSettings>.value(value: displayMode),
+        Provider<RideRepository>.value(value: rideRepository),
+        ChangeNotifierProvider<RideRecorder>.value(value: rideRecorder),
         ChangeNotifierProvider<RideTimeService>(
           create: (ctx) => RideTimeService.fromServices(
             ctx.read<BleService>(),
@@ -224,6 +238,38 @@ class _MainScreenState extends State<MainScreen> {
     });
   }
 
+  /// 打开骑行历史（作为独立页面 pushed，不占用底部导航）
+  void _openHistory() {
+    final repo = context.read<RideRepository>();
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => RideHistoryScreen(repository: repo)),
+    );
+  }
+
+  /// 结束骑行：落库后弹汇总层，可从汇总直接进入历史。
+  Future<void> _finishRide() async {
+    final recorder = context.read<RideRecorder>();
+    final ride = await recorder.finish();
+    if (ride == null || !mounted) return;
+    await showRideSummary(
+      context,
+      ride: ride,
+      onDone: () => Navigator.of(context).pop(),
+      onViewHistory: () {
+        Navigator.of(context).pop();
+        _openHistory();
+      },
+    );
+  }
+
+  /// 开始骑行：失败时用 toast 告知（如未开定位/无权限）
+  Future<void> _startRide() async {
+    final ok = await context.read<RideRecorder>().start();
+    if (!mounted) return;
+    final status = context.read<RideRecorder>().status;
+    if (!ok) showGlobalToast(status, error: true);
+  }
+
   /// 规格 §2.2：单行标题栏，左侧「连接状态」，右侧「骑行时间／设置」。
   /// 蓝牙图标连接成功时换成 bluetooth_connected，信号图标紧挨其右
   /// （连接绿色、未连接灰色），不再显示 dBm 数值与设备名称标签；
@@ -341,6 +387,9 @@ class _MainScreenState extends State<MainScreen> {
       body: switch (_index) {
         0 => DashboardScreen(
             onOpenDevices: () => _goTo(1),
+            onOpenHistory: _openHistory,
+            onStartRide: _startRide,
+            onFinishRide: _finishRide,
             showStartupSweep: _showStartupSweep,
           ),
         1 => const DeviceScreen(),

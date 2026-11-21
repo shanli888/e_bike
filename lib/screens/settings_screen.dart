@@ -5,6 +5,7 @@ import '../models/device_settings.dart';
 import '../models/command_result.dart';
 import '../widgets/app_dialogs.dart';
 import '../services/ble_service.dart';
+import '../services/display_mode_settings.dart';
 import '../services/local_wheel_settings.dart';
 import 'debug_screen.dart';
 
@@ -26,8 +27,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<BleService>(
-      builder: (context, ble, _) {
+    return Consumer2<BleService, DisplayModeSettings>(
+      builder: (context, ble, displayMode, _) {
         final settings = ble.deviceSettings;
 
         return Container(
@@ -131,6 +132,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
               const SizedBox(height: 24),
 
+              // 显示形态（分水岭）
+              _buildSectionHeader('显示形态'),
+              const SizedBox(height: 12),
+              _buildDisplayModeCard(displayMode),
+              const SizedBox(height: 24),
+
               // 关于
               _buildSectionHeader('关于'),
               const SizedBox(height: 12),
@@ -140,6 +147,54 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         );
       },
+    );
+  }
+
+  /// 显示形态切换：锁定纯码表模式。
+  /// 不锁定则自动跟随连接状态（连上助力器显示完整助力界面）。
+  Widget _buildDisplayModeCard(DisplayModeSettings displayMode) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: Colors.green.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(Icons.speed, color: Colors.green, size: 20),
+          ),
+          const SizedBox(width: 14),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('锁定纯码表模式',
+                    style: TextStyle(color: Colors.white, fontSize: 14)),
+                SizedBox(height: 2),
+                Text('开启后即使连接助力器也只显示骑行记录界面',
+                    style: TextStyle(color: Colors.white38, fontSize: 11)),
+              ],
+            ),
+          ),
+          Switch(
+            value: displayMode.locked,
+            activeThumbColor: Colors.green,
+            onChanged: (v) async {
+              final ok = await displayMode.setLocked(v);
+              if (!mounted) return;
+              if (!ok) _toast('设置保存失败', error: true);
+            },
+          ),
+        ],
+      ),
     );
   }
 

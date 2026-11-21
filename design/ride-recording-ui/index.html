@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>骑行记录功能 · UI 设计原型</title>
+<link rel="stylesheet" href="styles/tokens.css">
+<link rel="stylesheet" href="styles/base.css">
+<link rel="stylesheet" href="styles/components.css">
+</head>
+<body>
+
+<!-- ============ 图标 sprite ============ -->
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+  <symbol id="i-bt" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7.5 17 16.5 12 21V3l5 4.5L7 16.5"/></symbol>
+  <symbol id="i-signal" viewBox="0 0 24 24" fill="currentColor"><path d="M3 20h3v-4H3zM9 20h3V11H9zM15 20h3V6h-3zM21 20h1V3h-1z"/></symbol>
+  <symbol id="i-gps" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="3.2"/><circle cx="12" cy="12" r="8.5" stroke-dasharray="3 4"/><path d="M12 1v3M12 20v3M1 12h3M20 12h3"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2.5l1.4 2.8 3.1-.5.7 3.1 2.8 1.4-1.6 2.7 1.6 2.7-2.8 1.4-.7 3.1-3.1-.5L12 21.5l-1.4-2.8-3.1.5-.7-3.1-2.8-1.4 1.6-2.7-1.6-2.7 2.8-1.4.7-3.1 3.1.5z"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l3 2M9 2h6"/></symbol>
+  <symbol id="i-bike" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="5.5" cy="17" r="3.5"/><circle cx="18.5" cy="17" r="3.5"/><path d="M5.5 17l4-8.5h5l4 8.5M9.5 8.5 8 6M14.5 8.5 17 6h-4"/></symbol>
+  <symbol id="i-commute" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="5.5" cy="17" r="3.5"/><circle cx="18.5" cy="17" r="3.5"/><path d="M5.5 17l4-8.5h5l4 8.5M9.5 8.5 8 6M14.5 8.5 17 6h-4"/></symbol>
+  <symbol id="i-sport" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="13" cy="4" r="2"/><path d="M9 21l3-6-3-3V8l5-2 3 4h4M12 15l4 3 1 4"/></symbol>
+  <symbol id="i-climb" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M2 20l7-12 4 6 2-3 7 9z"/></symbol>
+  <symbol id="i-leisure" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M12 2v20M3.3 7l17.4 10M20.7 7 3.3 17"/><path d="M9 4l3 2 3-2M9 20l3-2 3 2"/></symbol>
+  <symbol id="i-manual" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/><circle cx="9" cy="7" r="2" fill="#151c2f"/><circle cx="16" cy="12" r="2" fill="#151c2f"/><circle cx="11" cy="17" r="2" fill="#151c2f"/></symbol>
+  <symbol id="i-minus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-battery" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="2" y="7" width="17" height="10" rx="2"/><path d="M21 10v4"/></symbol>
+  <symbol id="i-temp" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M14 14V5a2 2 0 0 0-4 0v9a4 4 0 1 0 4 0z"/><path d="M12 9v7"/></symbol>
+  <symbol id="i-gyro" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 3v4M21 12h-4M12 21v-4M3 12h4"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/></symbol>
+  <symbol id="i-rec" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="7"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></symbol>
+  <symbol id="i-flag" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V4m0 0h12l-2.5 4L17 12H5"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5l11 7-11 7z"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 17v3h16v-3"/></symbol>
+  <symbol id="i-warn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 22 20H2z"/><path d="M12 9v5m0 3h.01"/></symbol>
+  <symbol id="i-nav" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11 21 3l-8 18-2-8z"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s7-7 7-13a7 7 0 1 0-14 0c0 6 7 13 7 13z"/><circle cx="12" cy="9" r="2.5"/></symbol>
+</svg>
+
+<div class="stage">
+  <!-- ============ 左侧：屏幕选择器 ============ -->
+  <aside class="stage-side">
+    <p class="brand-kicker">UI Prototype · v1</p>
+    <h1 class="brand-title">骑行记录功能<br>界面设计稿</h1>
+    <p class="brand-sub">真机基线：YAL-AL10 实拍<br>工业实用风格 · 390×844 · 纯离线</p>
+
+    <div class="screen-picker" role="tablist" aria-label="界面列表">
+      <p class="picker-group-label">分水岭 · 双模式</p>
+      <button class="picker-btn active" data-target="standby"><span class="pn">01</span><span class="picker-dot"></span>纯码表模式 · 待记录</button>
+      <button class="picker-btn" data-target="assist"><span class="pn">02</span><span class="picker-dot"></span>助力完整模式 · 已连接</button>
+
+      <p class="picker-group-label">记录闭环</p>
+      <button class="picker-btn" data-target="recording"><span class="pn">03</span><span class="picker-dot"></span>记录中 · 实时数据</button>
+      <button class="picker-btn" data-target="summary"><span class="pn">04</span><span class="picker-dot"></span>骑行汇总弹层</button>
+      <button class="picker-btn" data-target="history"><span class="pn">05</span><span class="picker-dot"></span>历史列表</button>
+      <button class="picker-btn" data-target="detail"><span class="pn">06</span><span class="picker-dot"></span>骑行详情 · 曲线分析</button>
+      <button class="picker-btn" data-target="navigation"><span class="pn">07</span><span class="picker-dot"></span>路书跟随导航</button>
+    </div>
+  </aside>
+
+  <!-- ============ 中间：手机 mockup ============ -->
+  <div class="device-wrap">
+    <div class="device">
+      <div class="notch"></div>
+
+      <!-- ========== 01 纯码表模式 · 待记录 ========== -->
+      <section class="screen" data-screen="standby" aria-label="纯码表模式待记录">
+        <div class="statusbar">
+          <div class="sb-left"><span>10:15</span><span class="sb-icon" style="color:var(--color-blue)"><svg width="13" height="13"><use href="#i-bt"/></svg></span></div>
+          <div class="sb-right"><span>4G</span><span class="sb-icon"><svg width="12" height="12" fill="currentColor"><path d="M2 14h3V9H2zM7 14h3V5H7zM12 14h3V2h-3z"/></svg></span><span class="sb-battery"><i></i></span></div>
+        </div>
+        <header class="appbar">
+          <div class="appbar-left">
+            <span class="ab-icon" style="color:var(--color-muted)"><svg width="19" height="19"><use href="#i-bt"/></svg></span>
+            <span class="ab-icon" style="color:var(--color-muted)"><svg width="17" height="17"><use href="#i-signal"/></svg></span>
+            <span class="ab-icon" style="color:var(--color-cyan)"><svg width="17" height="17"><use href="#i-gps"/></svg></span>
+          </div>
+          <div class="appbar-right">
+            <div class="ride-clock"><svg width="14" height="14" style="color:var(--color-muted)"><use href="#i-clock"/></svg><span class="seg">01:24</span></div>
+            <button class="gear-btn" aria-label="设置"><svg width="18" height="18"><use href="#i-gear"/></svg></button>
+          </div>
+        </header>
+        <main class="content">
+          <div class="demo-flag">纯码表模式 · 未连接助力</div>
+          <div class="gauge-wrap" data-speed="0" data-avg="0" data-max="0">
+            <svg class="gauge-svg" viewBox="0 0 340 238" preserveAspectRatio="xMidYMid meet"></svg>
+            <div class="gauge-center-readout"><div class="gauge-speed seg">0.0</div><div class="gauge-unit">km/h</div></div>
+          </div>
+          <div class="stat-row">
+            <div class="stat-cell"><div class="stat-label">AVG</div><div class="stat-val seg">0.0<small>km/h</small></div></div>
+            <div class="stat-cell"><div class="stat-label">MAX</div><div class="stat-val seg">0.0<small>km/h</small></div></div>
+            <div class="stat-cell accent-green"><div class="stat-label">里程</div><div class="stat-val seg">0.00<small>km</small></div></div>
+          </div>
+          <div class="card start-card">
+            <p class="start-lead">手机 GPS 已就绪 · 未连接助力器<br>此时作为<b>独立骑行记录码表</b>使用</p>
+            <button class="start-btn"><svg width="19" height="19"><use href="#i-rec"/></svg>开始骑行</button>
+            <p class="start-hint">开始后自动记录轨迹、速度、里程与爬升</p>
+          </div>
+        </main>
+        <nav class="navbar">
+          <button class="nav-item active"><span class="nav-ico"><svg width="21" height="21"><use href="#i-bike"/></svg></span>码表</button>
+          <button class="nav-item muted"><span class="nav-ico"><svg width="20" height="20"><use href="#i-bt"/></svg></span>连接助力器</button>
+          <button class="nav-item"><span class="nav-ico"><svg width="20" height="20"><use href="#i-gear"/></svg></span>设置</button>
+        </nav>
+      </section>
+
+      <!-- ========== 02 助力完整模式 · 已连接 ========== -->
+      <section class="screen" data-screen="assist" hidden aria-label="助力完整模式已连接">
+        <div class="statusbar">
+          <div class="sb-left"><span>10:15</span><span class="sb-icon" style="color:var(--color-blue)"><svg width="13" height="13"><use href="#i-bt"/></svg></span></div>
+          <div class="sb-right"><span>4G</span><span class="sb-icon" style="color:var(--color-green)"><svg width="12" height="12" fill="currentColor"><path d="M2 14h3V9H2zM7 14h3V5H7zM12 14h3V2h-3z"/></svg></span><span class="sb-battery"><i></i></span></div>
+        </div>
+        <header class="appbar">
+          <div class="appbar-left">
+            <span class="ab-icon" style="color:var(--color-blue)"><svg width="19" height="19"><use href="#i-bt"/></svg></span>
+            <span class="ab-icon" style="color:var(--color-green)"><svg width="17" height="17"><use href="#i-signal"/></svg></span>
+            <span class="ab-icon" style="color:var(--color-cyan)"><svg width="17" height="17"><use href="#i-gps"/></svg></span>
+          </div>
+          <div class="appbar-right">
+            <div class="ride-clock"><svg width="14" height="14" style="color:var(--color-muted)"><use href="#i-clock"/></svg><span class="seg">01:24</span></div>
+            <button class="gear-btn" aria-label="设置"><svg width="18" height="18"><use href="#i-gear"/></svg></button>
+          </div>
+        </header>
+        <main class="content">
+          <div class="gauge-wrap" data-speed="21.7" data-avg="18.4" data-max="42.1">
+            <svg class="gauge-svg" viewBox="0 0 340 238" preserveAspectRatio="xMidYMid meet"></svg>
+            <div class="gauge-center-readout"><div class="gauge-speed seg">21.7</div><div class="gauge-unit">km/h</div></div>
+          </div>
+          <div class="stat-row">
+            <div class="stat-cell"><div class="stat-label">AVG</div><div class="stat-val seg">18.4<small>km/h</small></div></div>
+            <div class="stat-cell"><div class="stat-label">MAX</div><div class="stat-val seg">42.1<small>km/h</small></div></div>
+            <div class="stat-cell accent-green"><div class="stat-label">里程</div><div class="stat-val seg">12.68<small>km</small></div></div>
+          </div>
+          <div class="assist-card">
+            <div class="assist-head">
+              <div class="title"><svg width="18" height="18"><use href="#i-bike"/></svg>助力控制</div>
+              <span class="assist-badge">助力中</span>
+            </div>
+            <div class="mode-row">
+              <button class="mode-btn"><svg width="18" height="18"><use href="#i-commute"/></svg>通勤</button>
+              <button class="mode-btn"><svg width="18" height="18"><use href="#i-sport"/></svg>运动</button>
+              <button class="mode-btn active"><svg width="18" height="18"><use href="#i-climb"/></svg>爬坡</button>
+              <button class="mode-btn"><svg width="18" height="18"><use href="#i-leisure"/></svg>休闲</button>
+              <button class="mode-btn"><svg width="18" height="18"><use href="#i-manual"/></svg>手动</button>
+            </div>
+            <div class="level-row">
+              <button class="level-btn op"><svg width="18" height="18"><use href="#i-minus"/></svg></button>
+              <button class="level-btn">1</button>
+              <button class="level-btn">2</button>
+              <button class="level-btn active">3</button>
+              <button class="level-btn">4</button>
+              <button class="level-btn">5</button>
+              <button class="level-btn op"><svg width="18" height="18"><use href="#i-plus"/></svg></button>
+              <button class="level-btn stop">停止</button>
+            </div>
+          </div>
+          <div class="sensor-grid">
+            <div class="sensor-card">
+              <div class="sensor-label"><svg width="13" height="13" style="color:var(--color-orange)"><use href="#i-battery"/></svg>电量 21%</div>
+              <div class="sensor-value v-batt seg">34.1<small> V</small></div>
+              <div class="sensor-bar"><i style="width:21%;background:var(--color-orange)"></i></div>
+            </div>
+            <div class="sensor-card">
+              <div class="sensor-label"><svg width="13" height="13" style="color:var(--color-amber)"><use href="#i-temp"/></svg>温度 偏热</div>
+              <div class="sensor-value v-temp seg">48.3<small> °C</small></div>
+              <div class="sensor-bar"><i style="width:72%;background:var(--color-amber)"></i></div>
+            </div>
+            <div class="sensor-card">
+              <div class="sensor-label"><svg width="13" height="13" style="color:var(--color-blue)"><use href="#i-gyro"/></svg>陀螺仪</div>
+              <div class="sensor-value v-gyro seg">14.6<small> °</small></div>
+              <div class="sensor-bar"><i style="width:55%;background:var(--color-blue)"></i></div>
+            </div>
+          </div>
+        </main>
+        <nav class="navbar">
+          <button class="nav-item active"><span class="nav-ico"><svg width="21" height="21"><use href="#i-bike"/></svg></span>码表</button>
+          <button class="nav-item"><span class="nav-ico"><svg width="20" height="20"><use href="#i-bt"/></svg></span>设备</button>
+          <button class="nav-item"><span class="nav-ico"><svg width="20" height="20"><use href="#i-gear"/></svg></span>设置</button>
+        </nav>
+      </section>
+
+      <!-- ========== 03 记录中 · 实时数据 ========== -->
+      <section class="screen" data-screen="recording" hidden aria-label="记录中实时数据">
+        <div class="statusbar">
+          <div class="sb-left"><span>10:15</span><span class="sb-icon" style="color:var(--color-blue)"><svg width="13" height="13"><use href="#i-bt"/></svg></span></div>
+          <div class="sb-right"><span>4G</span><span class="sb-icon" style="color:var(--color-green)"><svg width="12" height="12" fill="currentColor"><path d="M2 14h3V9H2zM7 14h3V5H7zM12 14h3V2h-3z"/></svg></span><span class="sb-battery"><i></i></span></div>
+        </div>
+        <header class="appbar">
+          <div class="appbar-left">
+            <span class="ab-icon" style="color:var(--color-muted)"><svg width="19" height="19"><use href="#i-bt"/></svg></span>
+            <span class="ab-icon" style="color:var(--color-muted)"><svg width="17" height="17"><use href="#i-signal"/></svg></span>
+            <span class="ab-icon" style="color:var(--color-green)"><svg width="17" height="17"><use href="#i-gps"/></svg></span>
+          </div>
+          <div class="appbar-right">
+            <div class="ride-clock"><svg width="14" height="14" style="color:var(--color-muted)"><use href="#i-clock"/></svg><span class="seg">32:18</span></div>
+            <button class="gear-btn" aria-label="设置"><svg width="18" height="18"><use href="#i-gear"/></svg></button>
+          </div>
+        </header>
+        <main class="content">
+          <div class="gauge-wrap" data-speed="28.4" data-avg="22.6" data-max="51.3">
+            <svg class="gauge-svg" viewBox="0 0 340 238" preserveAspectRatio="xMidYMid meet"></svg>
+            <div class="gauge-center-readout"><div class="gauge-speed seg">28.4</div><div class="gauge-unit">km/h</div></div>
+          </div>
+          <div class="stat-row">
+            <div class="stat-cell"><div class="stat-label">AVG</div><div class="stat-val seg">22.6<small>km/h</small></div></div>
+            <div class="stat-cell"><div class="stat-label">MAX</div><div class="stat-val seg">51.3<small>km/h</small></div></div>
+            <div class="stat-cell accent-green"><div class="stat-label">里程</div><div class="stat-val seg">12.68<small>km</small></div></div>
+          </div>
+          <div class="rec-bar">
+            <div class="rec-left">
+              <span class="rec-dot"></span>
+              <div><div class="rec-label">记录中</div><div class="rec-time seg">00:32:18</div></div>
+            </div>
+            <div class="rec-actions">
+              <button class="rec-btn pause"><svg width="13" height="13"><use href="#i-pause"/></svg>暂停</button>
+              <button class="rec-btn finish"><svg width="13" height="13"><use href="#i-flag"/></svg>结束</button>
+            </div>
+          </div>
+          <div class="track-thumb">
+            <span class="tt-chip">GPS 轨迹 · 实时</span>
+            <svg viewBox="0 0 360 122" preserveAspectRatio="none">
+              <path d="M-5 100 C40 92 55 60 96 66 S150 30 196 44 S250 78 292 52 S340 24 372 34" fill="none" stroke="rgba(94,224,160,0.18)" stroke-width="7" stroke-linecap="round"/>
+              <path d="M-5 100 C40 92 55 60 96 66 S150 30 196 44 S250 78 292 52 S340 24 372 34" fill="none" stroke="var(--color-track)" stroke-width="2.4" stroke-linecap="round"/>
+              <circle cx="292" cy="52" r="5.5" fill="#fff" stroke="var(--color-track)" stroke-width="2.5"/>
+            </svg>
+          </div>
+          <div class="live-metrics">
+            <div class="live-metric"><div class="lm-label">累计爬升</div><div class="lm-val seg c-amber">186<small> m</small></div></div>
+            <div class="live-metric"><div class="lm-label">当前坡度</div><div class="lm-val seg c-blue">4.2<small> °</small></div></div>
+            <div class="live-metric"><div class="lm-label">估算卡路里</div><div class="lm-val seg c-green">412<small> kcal</small></div></div>
+          </div>
+        </main>
+        <nav class="navbar">
+          <button class="nav-item active"><span class="nav-ico"><svg width="21" height="21"><use href="#i-bike"/></svg></span>码表</button>
+          <button class="nav-item"><span class="nav-ico"><svg width="20" height="20"><use href="#i-bt"/></svg></span>设备</button>
+          <button class="nav-item"><span class="nav-ico"><svg width="20" height="20"><use href="#i-gear"/></svg></span>设置</button>
+        </nav>
+      </section>
+
+      <!-- ========== 04 骑行汇总弹层 ========== -->
+      <section class="screen" data-screen="summary" hidden aria-label="骑行汇总">
+        <div class="statusbar">
+          <div class="sb-left"><span>10:47</span><span class="sb-icon" style="color:var(--color-blue)"><svg width="13" height="13"><use href="#i-bt"/></svg></span></div>
+          <div class="sb-right"><span>4G</span><span class="sb-icon" style="color:var(--color-green)"><svg width="12" height="12" fill="currentColor"><path d="M2 14h3V9H2zM7 14h3V5H7zM12 14h3V2h-3z"/></svg></span><span class="sb-battery"><i></i></span></div>
+        </div>
+        <header class="appbar">
+          <div class="appbar-left">
+            <span class="ab-icon" style="color:var(--color-muted)"><svg width="19" height="19"><use href="#i-bt"/></svg></span>
+            <span class="ab-icon" style="color:var(--color-muted)"><svg width="17" height="17"><use href="#i-signal"/></svg></span>
+            <span class="ab-icon" style="color:var(--color-green)"><svg width="17" height="17"><use href="#i-gps"/></svg></span>
+          </div>
+          <div class="appbar-right">
+            <div class="ride-clock"><svg width="14" height="14" style="color:var(--color-muted)"><use href="#i-clock"/></svg><span class="seg">32:18</span></div>
+            <button class="gear-btn" aria-label="设置"><svg width="18" height="18"><use href="#i-gear"/></svg></button>
+          </div>
+        </header>
+        <main class="content">
+          <div class="gauge-wrap" data-speed="0" data-avg="22.6" data-max="51.3">
+            <svg class="gauge-svg" viewBox="0 0 340 238" preserveAspectRatio="xMidYMid meet"></svg>
+            <div class="gauge-center-readout"><div class="gauge-speed seg">0.0</div><div class="gauge-unit">km/h</div></div>
+          </div>
+          <div class="stat-row">
+            <div class="stat-cell"><div class="stat-label">AVG</div><div class="stat-val seg">22.6<small>km/h</small></div></div>
+            <div class="stat-cell"><div class="stat-label">MAX</div><div class="stat-val seg">51.3<small>km/h</small></div></div>
+            <div class="stat-cell accent-green"><div class="stat-label">里程</div><div class="stat-val seg">12.68<small>km</small></div></div>
+          </div>
+        </main>
+        <div class="overlay">
+          <div class="sheet">
+            <div class="sheet-grab"></div>
+            <h2 class="sheet-title">骑行完成</h2>
+            <p class="sheet-sub">2026-11-21 09:15 · 城市环线骑行</p>
+            <div class="summary-grid">
+              <div class="summary-cell"><div class="sc-val seg">12.68<small> km</small></div><div class="sc-label">总距离</div></div>
+              <div class="summary-cell"><div class="sc-val seg">32:18</div><div class="sc-label">移动时长</div></div>
+              <div class="summary-cell"><div class="sc-val seg">23.5<small> km/h</small></div><div class="sc-label">移动均速</div></div>
+              <div class="summary-cell"><div class="sc-val seg">51.3<small> km/h</small></div><div class="sc-label">极速</div></div>
+              <div class="summary-cell"><div class="sc-val seg c-amber">186<small> m</small></div><div class="sc-label">累计爬升</div></div>
+              <div class="summary-cell"><div class="sc-val seg c-green">428<small> kcal</small></div><div class="sc-label">消耗</div></div>
+            </div>
+            <div class="sheet-actions">
+              <button class="sheet-btn ghost">放弃</button>
+              <button class="sheet-btn primary">保存骑行</button>
+            </div>
+          </div>
+        </div>
+        <nav class="navbar">
+          <button class="nav-item active"><span class="nav-ico"><svg width="21" height="21"><use href="#i-bike"/></svg></span>码表</button>
+          <button class="nav-item"><span class="nav-ico"><svg width="20" height="20"><use href="#i-bt"/></svg></span>设备</button>
+          <button class="nav-item"><span class="nav-ico"><svg width="20" height="20"><use href="#i-gear"/></svg></span>设置</button>
+        </nav>
+      </section>
+
+      <!-- ========== 05 历史列表 ========== -->
+      <section class="screen" data-screen="history" hidden aria-label="历史骑行列表">
+        <div class="statusbar">
+          <div class="sb-left"><span>10:15</span><span class="sb-icon" style="color:var(--color-blue)"><svg width="13" height="13"><use href="#i-bt"/></svg></span></div>
+          <div class="sb-right"><span>4G</span><span class="sb-icon"><svg width="12" height="12" fill="currentColor"><path d="M2 14h3V9H2zM7 14h3V5H7zM12 14h3V2h-3z"/></svg></span><span class="sb-battery"><i></i></span></div>
+        </div>
+        <header class="appbar">
+          <div class="appbar-left"><span style="font-size:15px;font-weight:600">我的骑行</span></div>
+          <div class="appbar-right"><button class="gear-btn" aria-label="更多"><svg width="18" height="18"><use href="#i-download"/></svg></button></div>
+        </header>
+        <main class="content">
+          <div class="page-head">
+            <h2 class="page-title">骑行记录<small>共 24 次 · 累计 386.4 km</small></h2>
+            <span class="head-action">本月 ▾</span>
+          </div>
+          <div class="summary-strip">
+            <div class="ss-cell"><div class="ss-val seg c-green">128.6</div><div class="ss-label">本月里程 km</div></div>
+            <div class="ss-cell"><div class="ss-val seg">9</div><div class="ss-label">骑行次数</div></div>
+            <div class="ss-cell"><div class="ss-val seg c-amber">1,240</div><div class="ss-label">累计爬升 m</div></div>
+          </div>
+          <p class="section-cap">2026 年 11 月</p>
+          <div class="ride-list">
+            <button class="ride-item" data-go="detail">
+              <div class="ride-map"><svg viewBox="0 0 80 74"><path d="M6 60 C16 50 14 34 30 36 S48 20 58 26 S70 16 76 12" fill="none" stroke="var(--color-track)" stroke-width="2" stroke-linecap="round"/><circle cx="6" cy="60" r="2.5" fill="#fff"/></svg></div>
+              <div class="ride-info">
+                <div class="ride-date">11月21日 周六 09:15</div>
+                <h3 class="ride-name">城市环线骑行</h3>
+                <div class="ride-stats">
+                  <div><span class="rs-val seg">12.68<small>km</small></span><span class="rs-label">距离</span></div>
+                  <div><span class="rs-val seg">32:18</span><span class="rs-label">时长</span></div>
+                  <div><span class="rs-val seg">23.5</span><span class="rs-label">均速</span></div>
+                </div>
+              </div>
+            </button>
+            <button class="ride-item" data-go="detail">
+              <div class="ride-map"><svg viewBox="0 0 80 74"><path d="M8 18 C24 16 20 40 38 42 S56 58 72 54" fill="none" stroke="var(--color-track)" stroke-width="2" stroke-linecap="round"/><circle cx="8" cy="18" r="2.5" fill="#fff"/></svg></div>
+              <div class="ride-info">
+                <div class="ride-date">11月19日 周四 18:40</div>
+                <h3 class="ride-name">滨江夜骑</h3>
+                <div class="ride-stats">
+                  <div><span class="rs-val seg">24.30<small>km</small></span><span class="rs-label">距离</span></div>
+                  <div><span class="rs-val seg">58:02</span><span class="rs-label">时长</span></div>
+                  <div><span class="rs-val seg">25.1</span><span class="rs-label">均速</span></div>
+                </div>
+              </div>
+            </button>
+            <button class="ride-item" data-go="detail">
+              <div class="ride-map"><svg viewBox="0 0 80 74"><path d="M10 56 C10 30 40 30 40 16 S70 20 70 44" fill="none" stroke="var(--color-track)" stroke-width="2" stroke-linecap="round"/><circle cx="10" cy="56" r="2.5" fill="#fff"/></svg></div>
+              <div class="ride-info">
+                <div class="ride-date">11月16日 周一 07:20</div>
+                <h3 class="ride-name">通勤 · 山路段</h3>
+                <div class="ride-stats">
+                  <div><span class="rs-val seg">8.42<small>km</small></span><span class="rs-label">距离</span></div>
+                  <div><span class="rs-val seg">26:45</span><span class="rs-label">时长</span></div>
+                  <div><span class="rs-val seg">18.9</span><span class="rs-label">均速</span></div>
+                </div>
+              </div>
+            </button>
+          </div>
+        </main>
+        <nav class="navbar">
+          <button class="nav-item active"><span class="nav-ico"><svg width="21" height="21"><use href="#i-bike"/></svg></span>码表</button>
+          <button class="nav-item"><span class="nav-ico"><svg width="20" height="20"><use href="#i-bt"/></svg></span>设备</button>
+          <button class="nav-item"><span class="nav-ico"><svg width="20" height="20"><use href="#i-gear"/></svg></span>设置</button>
+        </nav>
+      </section>
+
+      <!-- ========== 06 骑行详情 · 曲线分析 ========== -->
+      <section class="screen" data-screen="detail" hidden aria-label="骑行详情">
+        <div class="statusbar">
+          <div class="sb-left"><span>10:15</span><span class="sb-icon" style="color:var(--color-blue)"><svg width="13" height="13"><use href="#i-bt"/></svg></span></div>
+          <div class="sb-right"><span>4G</span><span class="sb-icon"><svg width="12" height="12" fill="currentColor"><path d="M2 14h3V9H2zM7 14h3V5H7zM12 14h3V2h-3z"/></svg></span><span class="sb-battery"><i></i></span></div>
+        </div>
+        <header class="appbar">
+          <div class="appbar-left">
+            <button class="gear-btn" data-go="history" style="width:32px;height:32px" aria-label="返回"><svg width="18" height="18"><use href="#i-back"/></svg></button>
+            <span style="font-size:15px;font-weight:600;margin-left:4px">骑行详情</span>
+          </div>
+          <div class="appbar-right"><button class="gear-btn" aria-label="导出"><svg width="17" height="17"><use href="#i-download"/></svg></button></div>
+        </header>
+        <main class="content">
+          <div class="detail-map">
+            <span class="dm-badge">轨迹回放 · 12.68 km</span>
+            <svg viewBox="0 0 362 210" preserveAspectRatio="xMidYMid meet">
+              <path d="M28 168 C60 150 52 108 96 116 S150 70 196 88 S252 128 292 96 S336 58 344 48" fill="none" stroke="rgba(94,224,160,0.16)" stroke-width="9" stroke-linecap="round"/>
+              <path d="M28 168 C60 150 52 108 96 116 S150 70 196 88 S252 128 292 96 S336 58 344 48" fill="none" stroke="var(--color-track)" stroke-width="2.6" stroke-linecap="round"/>
+              <circle cx="28" cy="168" r="4.5" fill="var(--color-green)"/>
+              <circle cx="344" cy="48" r="4.5" fill="var(--color-rec)"/>
+              <circle cx="196" cy="88" r="6" fill="#fff" stroke="var(--color-track)" stroke-width="3"/>
+            </svg>
+            <div class="dm-replay">
+              <button class="dm-play" aria-label="播放回放"><svg width="13" height="13"><use href="#i-play"/></svg></button>
+              <div class="dm-track"><i></i></div>
+              <span class="dm-time">12:18 / 32:18</span>
+            </div>
+          </div>
+
+          <div class="summary-strip" style="margin-top:12px">
+            <div class="ss-cell"><div class="ss-val seg">32:18</div><div class="ss-label">移动时长</div></div>
+            <div class="ss-cell"><div class="ss-val seg c-amber">186</div><div class="ss-label">爬升 m</div></div>
+            <div class="ss-cell"><div class="ss-val seg c-green">428</div><div class="ss-label">消耗 kcal</div></div>
+          </div>
+
+          <div class="card chart-card">
+            <div class="chart-head">
+              <span class="chart-title" style="font-size:var(--fs-md);font-weight:600">速度与海拔</span>
+              <div class="chart-legend">
+                <span class="legend-item"><i class="legend-swatch" style="background:var(--color-speed-curve)"></i>速度</span>
+                <span class="legend-item"><i class="legend-swatch" style="background:var(--color-altitude)"></i>海拔</span>
+              </div>
+            </div>
+            <svg class="chart-area" viewBox="0 0 340 118" preserveAspectRatio="none">
+              <defs>
+                <linearGradient id="speedFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="rgba(74,168,255,0.28)"/><stop offset="1" stop-color="rgba(74,168,255,0)"/></linearGradient>
+              </defs>
+              <line x1="0" y1="30" x2="340" y2="30" stroke="rgba(255,255,255,0.06)"/>
+              <line x1="0" y1="60" x2="340" y2="60" stroke="rgba(255,255,255,0.06)"/>
+              <line x1="0" y1="90" x2="340" y2="90" stroke="rgba(255,255,255,0.06)"/>
+              <path d="M0 96 L24 86 L48 90 L72 66 L96 74 L120 52 L144 58 L168 38 L192 48 L216 30 L240 42 L264 26 L288 36 L312 22 L340 30 L340 118 L0 118 Z" fill="url(#speedFill)"/>
+              <path d="M0 96 L24 86 L48 90 L72 66 L96 74 L120 52 L144 58 L168 38 L192 48 L216 30 L240 42 L264 26 L288 36 L312 22 L340 30" fill="none" stroke="var(--color-speed-curve)" stroke-width="2" stroke-linejoin="round"/>
+              <path d="M0 104 L26 100 L52 96 L78 92 L104 84 L130 80 L156 70 L182 66 L208 58 L234 54 L260 46 L286 44 L312 34 L340 30" fill="none" stroke="var(--color-altitude)" stroke-width="1.8" stroke-linejoin="round" stroke-dasharray="1 0"/>
+            </svg>
+            <div class="chart-axis"><span>0 km</span><span>3 km</span><span>6 km</span><span>9 km</span><span>12.68 km</span></div>
+          </div>
+
+          <div class="split-list">
+            <p class="section-cap" style="margin-bottom:4px">每公里分段</p>
+            <div class="split-row best"><span class="split-km">1 km</span><div class="split-bar"><i style="width:88%"></i></div><span class="split-time seg-mini">04'12</span><span class="split-speed">26.4</span></div>
+            <div class="split-row"><span class="split-km">2 km</span><div class="split-bar"><i style="width:78%"></i></div><span class="split-time seg-mini">04'48</span><span class="split-speed">23.1</span></div>
+            <div class="split-row"><span class="split-km">3 km</span><div class="split-bar"><i style="width:72%"></i></div><span class="split-time seg-mini">05'06</span><span class="split-speed">21.7</span></div>
+            <div class="split-row best"><span class="split-km">4 km</span><div class="split-bar"><i style="width:92%"></i></div><span class="split-time seg-mini">04'02</span><span class="split-speed">27.5</span></div>
+          </div>
+        </main>
+        <nav class="navbar">
+          <button class="nav-item active"><span class="nav-ico"><svg width="21" height="21"><use href="#i-bike"/></svg></span>码表</button>
+          <button class="nav-item"><span class="nav-ico"><svg width="20" height="20"><use href="#i-bt"/></svg></span>设备</button>
+          <button class="nav-item"><span class="nav-ico"><svg width="20" height="20"><use href="#i-gear"/></svg></span>设置</button>
+        </nav>
+      </section>
+
+      <!-- ========== 07 路书跟随导航 ========== -->
+      <section class="screen" data-screen="navigation" hidden aria-label="路书跟随导航">
+        <div class="statusbar">
+          <div class="sb-left"><span>10:15</span><span class="sb-icon" style="color:var(--color-blue)"><svg width="13" height="13"><use href="#i-bt"/></svg></span></div>
+          <div class="sb-right"><span>4G</span><span class="sb-icon" style="color:var(--color-green)"><svg width="12" height="12" fill="currentColor"><path d="M2 14h3V9H2zM7 14h3V5H7zM12 14h3V2h-3z"/></svg></span><span class="sb-battery"><i></i></span></div>
+        </div>
+        <header class="appbar">
+          <div class="appbar-left">
+            <span class="ab-icon" style="color:var(--color-cyan)"><svg width="17" height="17"><use href="#i-gps"/></svg></span>
+            <span style="font-size:15px;font-weight:600;margin-left:2px">路书导航</span>
+          </div>
+          <div class="appbar-right">
+            <div class="ride-clock"><svg width="14" height="14" style="color:var(--color-muted)"><use href="#i-clock"/></svg><span class="seg">18:24</span></div>
+          </div>
+        </header>
+        <main class="content" style="padding:0 12px 10px">
+          <div class="nav-map">
+            <svg viewBox="0 0 366 690" preserveAspectRatio="xMidYMid slice">
+              <g stroke="rgba(255,255,255,0.045)" stroke-width="1" fill="none">
+                <path d="M0 120 H366 M0 260 H366 M0 400 H366 M0 540 H366"/>
+                <path d="M80 0 V690 M200 0 V690 M300 0 V690"/>
+              </g>
+              <path d="M60 640 C90 560 70 500 120 470 S210 440 200 370 S140 320 170 250 S280 210 270 140 S310 90 320 50" fill="none" stroke="rgba(74,168,255,0.16)" stroke-width="14" stroke-linecap="round"/>
+              <path d="M60 640 C90 560 70 500 120 470 S210 440 200 370 S140 320 170 250 S280 210 270 140 S310 90 320 50" fill="none" stroke="var(--color-blue)" stroke-width="3" stroke-linecap="round"/>
+              <path d="M60 640 C90 560 70 500 120 470 S210 440 200 370" fill="none" stroke="var(--color-green)" stroke-width="3.4" stroke-linecap="round"/>
+              <circle cx="200" cy="370" r="16" fill="rgba(61,220,140,0.14)"/>
+              <circle cx="200" cy="370" r="7" fill="#fff" stroke="var(--color-green)" stroke-width="3"/>
+              <g transform="translate(170,250)"><circle r="9" fill="#0a0e1c" stroke="var(--color-orange)" stroke-width="2"/><circle r="3" fill="var(--color-orange)"/></g>
+              <g transform="translate(320,50)"><path d="M0 -12 L9 8 L0 3 L-9 8 Z" fill="var(--color-rec)"/></g>
+            </svg>
+            <div class="nav-top-card">
+              <div class="ntc"><div class="ntc-val seg c-blue">5.32</div><div class="ntc-label">剩余 km</div></div>
+              <div class="ntc"><div class="ntc-val seg">00:18:24</div><div class="ntc-label">已用时长</div></div>
+              <div class="ntc"><div class="ntc-val seg c-green">42%</div><div class="ntc-label">进度</div></div>
+            </div>
+            <div class="nav-progress"><i></i></div>
+            <div class="offcourse"><svg width="14" height="14"><use href="#i-warn"/></svg>已偏离路线 35 m，请返回路线</div>
+            <div class="nav-hint">
+              <span class="nh-ico"><svg width="20" height="20"><use href="#i-pin"/></svg></span>
+              <div><div class="nh-title">前方 300 m · 右转进入山道</div><div class="nh-sub">关键点 3/8 · 滨江补给点</div></div>
+            </div>
+          </div>
+        </main>
+        <nav class="navbar">
+          <button class="nav-item active"><span class="nav-ico"><svg width="21" height="21"><use href="#i-nav"/></svg></span>导航</button>
+          <button class="nav-item"><span class="nav-ico"><svg width="20" height="20"><use href="#i-rec"/></svg></span>记录中</button>
+          <button class="nav-item"><span class="nav-ico"><svg width="20" height="20"><use href="#i-flag"/></svg></span>结束</button>
+        </nav>
+      </section>
+
+    </div>
+  </div>
+
+  <!-- ============ 右侧：设计说明 ============ -->
+  <aside class="stage-notes">
+    <p class="notes-title" id="notes-title">设计说明</p>
+    <div id="notes-body"></div>
+    <div class="note-block" style="margin-top:18px;border-top:1px solid var(--color-border);padding-top:16px">
+      <p class="notes-title">配色令牌</p>
+      <div class="swatch-row">
+        <span class="swatch" style="background:#0a0e1c" title="背景 #0a0e1c"></span>
+        <span class="swatch" style="background:#151c2f" title="卡片 #151c2f"></span>
+        <span class="swatch" style="background:#ffb020" title="橙 #ffb020"></span>
+        <span class="swatch" style="background:#3ddc8c" title="绿 #3ddc8c"></span>
+        <span class="swatch" style="background:#4aa8ff" title="蓝 #4aa8ff"></span>
+        <span class="swatch" style="background:#ff4d5e" title="录制红 #ff4d5e"></span>
+      </div>
+      <p class="note-p" style="margin-top:8px">与真机 App 完全同源的 DSEG7 数码管 + 三色语义体系，仅新增录制红 / 轨迹绿用于记录态。</p>
+    </div>
+  </aside>
+</div>
+
+<script src="scripts/main.js"></script>
+</body>
+</html>

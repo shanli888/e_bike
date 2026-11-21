@@ -14,6 +14,11 @@
     <uses-feature android:name="android.hardware.location.gps" android:required="false" />
     <!-- 码表骑行时保持屏幕常亮 -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- 骑行记录：后台持续定位的前台服务（geolocator foregroundNotificationConfig 依赖） -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <!-- 部分国产 ROM 上前台服务通知需要通知权限（Android 13+ 运行时申请由 geolocator 处理） -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- 需要 BLE 硬件 -->
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />

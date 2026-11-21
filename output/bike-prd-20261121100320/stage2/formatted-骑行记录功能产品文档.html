@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="docx-page-size" content="A4">
+<title>骑行记录功能产品文档（纯手机版）</title>
+<style>
+:root {
+  --typography-fontFamily-heading: 微软雅黑, Microsoft YaHei, PingFang SC;
+  --typography-fontFamily-body: 微软雅黑, Microsoft YaHei, PingFang SC;
+  --typography-fontFamily-code: Consolas, Source Code Pro, monospace;
+  --typography-fontSize-coverTitle: 22pt;
+  --typography-fontSize-coverCategory: 14pt;
+  --typography-fontSize-h1: 20pt;
+  --typography-fontSize-h2: 15pt;
+  --typography-fontSize-h3: 13pt;
+  --typography-fontSize-body: 12pt;
+  --typography-fontSize-small: 9pt;
+  --typography-lineHeight-body: 1.6;
+  --typography-fontWeight-heading: 600;
+  --typography-fontWeight-body: 400;
+  --typography-fontWeight-emphasis: 500;
+  --color-primary: #1565C0;
+  --color-accent: #00897B;
+  --color-text: #212121;
+  --color-textSecondary: #616161;
+  --color-heading: #1A237E;
+  --color-divider: #E0E0E0;
+  --color-background: #FFFFFF;
+  --color-surface: #F5F7FA;
+  --color-callout-bg: #EEF4FB;
+  --spacing-paragraph: 0.75em;
+  --spacing-sectionGap: 2.5em;
+  --layout-marginTop: 2.5cm;
+  --layout-marginBottom: 2.0cm;
+  --layout-marginLeft: 2.5cm;
+  --layout-marginRight: 2.5cm;
+  --layout-maxContentWidth: 160mm;
+
+  --fs-cover-title: var(--typography-fontSize-coverTitle);
+  --fs-cover-cat: var(--typography-fontSize-coverCategory);
+  --fs-h1: var(--typography-fontSize-h1);
+  --fs-h2: var(--typography-fontSize-h2);
+  --fs-h3: var(--typography-fontSize-h3);
+  --fs-body: var(--typography-fontSize-body);
+  --fs-small: var(--typography-fontSize-small);
+  --ff-heading: var(--typography-fontFamily-heading);
+  --ff-body: var(--typography-fontFamily-body);
+  --ff-mono: var(--typography-fontFamily-code);
+  --lh-body: var(--typography-lineHeight-body);
+  --fw-bold: var(--typography-fontWeight-heading);
+  --fw-normal: var(--typography-fontWeight-body);
+  --fw-em: var(--typography-fontWeight-emphasis);
+  --spacing-block: 1.2em;
+  --page-content-width: var(--layout-maxContentWidth);
+}
+
+@page { @bottom-center { content: counter(page); } }
+@page cover { @bottom-center { content: none; } }
+section[role="cover"] { page: cover; }
+
+body {
+  max-width: var(--page-content-width);
+  margin-left: auto;
+  margin-right: auto;
+  font-family: var(--ff-body);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  color: var(--color-text);
+}
+p { font-family: var(--ff-body); font-size: var(--fs-body); line-height: var(--lh-body); text-align: justify; text-indent: 2em; margin-top: 0; margin-bottom: var(--spacing-paragraph); }
+h1 { font-family: var(--ff-heading); font-size: var(--fs-h1); font-weight: var(--fw-bold); color: var(--color-heading); margin-top: var(--spacing-sectionGap); margin-bottom: var(--spacing-block); }
+h2 { font-family: var(--ff-heading); font-size: var(--fs-h2); font-weight: var(--fw-bold); color: var(--color-primary); margin-top: var(--spacing-block); margin-bottom: var(--spacing-paragraph); }
+h3 { font-family: var(--ff-heading); font-size: var(--fs-h3); font-weight: var(--fw-em); color: var(--color-text); margin-top: var(--spacing-block); margin-bottom: var(--spacing-paragraph); }
+ol, ul { font-family: var(--ff-body); font-size: var(--fs-body); line-height: var(--lh-body); margin-top: 0; margin-bottom: var(--spacing-paragraph); }
+li { font-family: var(--ff-body); font-size: var(--fs-body); line-height: var(--lh-body); margin-bottom: 0.35em; }
+strong { font-weight: var(--fw-bold); }
+code { font-family: var(--ff-mono); font-size: var(--fs-small); }
+table { width: 100%; border-collapse: collapse; margin-top: var(--spacing-block); margin-bottom: var(--spacing-block); }
+th, td { font-family: var(--ff-body); font-size: var(--fs-small); line-height: 1.4; border: 0.5px solid var(--color-divider); padding: 6px 8px; text-align: left; vertical-align: top; }
+th { font-weight: var(--fw-bold); background-color: var(--color-surface); color: var(--color-heading); }
+caption { font-family: var(--ff-body); font-size: var(--fs-small); color: var(--color-textSecondary); text-align: left; margin-bottom: 0.4em; }
+
+.cover-kicker { font-family: var(--ff-heading); font-size: var(--fs-cover-cat); font-weight: var(--fw-em); color: var(--color-primary); text-align: center; text-indent: 0; margin-top: 4em; margin-bottom: 1.5em; }
+.cover-title { font-family: var(--ff-heading); font-size: var(--fs-cover-title); font-weight: var(--fw-bold); color: var(--color-heading); text-align: center; text-indent: 0; line-height: 1.4; margin-top: 2em; margin-bottom: 1em; }
+.cover-sub { font-family: var(--ff-body); font-size: var(--fs-h3); color: var(--color-textSecondary); text-align: center; text-indent: 0; margin-top: 1em; margin-bottom: 3em; }
+.cover-meta { font-family: var(--ff-body); font-size: var(--fs-body); color: var(--color-textSecondary); text-align: center; text-indent: 0; margin-top: 0.5em; margin-bottom: 0.5em; }
+
+.toc-title { font-family: var(--ff-heading); font-size: var(--fs-h1); font-weight: var(--fw-bold); color: var(--color-heading); text-align: center; text-indent: 0; margin-bottom: 1.5em; }
+.toc-list, .toc-list ol { list-style: none; padding-left: 0; }
+.toc-list { margin-top: 1em; }
+.toc-list > li { font-family: var(--ff-body); font-size: var(--fs-body); margin-bottom: 0.5em; }
+.toc-list ol { padding-left: 1.5em; margin-top: 0.3em; margin-bottom: 0.3em; }
+.toc-list ol > li { font-family: var(--ff-body); font-size: var(--fs-small); color: var(--color-textSecondary); margin-bottom: 0.25em; }
+.toc-list a { color: var(--color-text); text-decoration: none; }
+
+.executive-summary { background-color: var(--color-surface); border-left: 3px solid var(--color-primary); padding: 12px 16px; margin-top: var(--spacing-block); margin-bottom: var(--spacing-block); }
+.executive-summary p { text-indent: 0; margin-bottom: 0.5em; }
+.executive-summary p:last-child { margin-bottom: 0; }
+.executive-summary .es-title { font-weight: var(--fw-bold); color: var(--color-heading); font-family: var(--ff-heading); }
+
+.note { border-left: 3px solid var(--color-accent); background-color: var(--color-callout-bg); padding: 10px 14px; margin-top: var(--spacing-block); margin-bottom: var(--spacing-block); }
+.note p { text-indent: 0; margin-bottom: 0; }
+
+.plain-table th, .plain-table td { font-size: var(--fs-small); }
+.section-end { font-family: var(--ff-body); font-size: var(--fs-small); color: var(--color-textSecondary); text-indent: 0; margin-top: 0.5em; }
+</style>
+</head>
+<body>
+
+<section role="cover">
+  <p class="cover-kicker">产品需求文档 · PRD</p>
+  <p class="cover-title">骑行记录功能产品文档<br>（纯手机版）</p>
+  <p class="cover-sub">为离线电助力码表补齐「记录—存储—分析—导航」闭环</p>
+  <p class="cover-meta">项目：bike_computer</p>
+  <p class="cover-meta">版本：V1.0</p>
+  <p class="cover-meta">日期：2026-11-21</p>
+</section>
+
+<section role="cover">
+<nav class="doc-toc" aria-label="文档目录">
+  <p class="toc-title">目录</p>
+  <ol class="toc-list">
+    <li><a href="#s1">一、文档概述</a>
+      <ol><li>1.1 背景与目标</li><li>1.2 范围界定</li><li>1.3 名词说明</li></ol>
+    </li>
+    <li><a href="#s2">二、产品定位与用户场景</a>
+      <ol><li>2.1 定位</li><li>2.2 核心用户场景</li><li>2.3 双模式形态（按连接状态切分）</li></ol>
+    </li>
+    <li><a href="#s3">三、功能范围</a>
+      <ol><li>3.1 功能全景与覆盖状态</li><li>3.2 本期能力链路</li><li>3.3 明确不做</li></ol>
+    </li>
+    <li><a href="#s4">四、功能需求详述</a>
+      <ol><li>4.1 骑行记录</li><li>4.2 本地历史与回放</li><li>4.3 数据分析</li><li>4.4 GPX 导入导出</li><li>4.5 路书导航</li></ol>
+    </li>
+    <li><a href="#s5">五、关键技术方案</a>
+      <ol><li>5.1 数据模型</li><li>5.2 存储方案</li><li>5.3 前台服务与功耗</li><li>5.4 路书导航方案选型</li><li>5.5 坐标与合规</li></ol>
+    </li>
+    <li><a href="#s6">六、分期与里程碑</li>
+    <li><a href="#s7">七、风险与约束</li>
+    <li><a href="#s8">八、验收标准（要点）</li>
+  </ol>
+</nav>
+</section>
+
+<section role="body" data-page-restart="1">
+
+<div class="executive-summary">
+  <p class="es-title">执行摘要</p>
+  <p>当前应用是一款纯离线电助力自行车码表，具备实时显示与蓝牙助力控制能力，但数据仅存于连接期间、断线即清零，不具备任何记录能力。本文档规划在<strong>不依赖外接传感器、不联网、不登录</strong>的前提下，由手机独立完成骑行数据的记录、存储、分析与导航闭环，覆盖成熟骑行应用约 60% 至 70% 的核心价值。</p>
+  <p>功能按 P0 核心闭环、P1 分析与交换、P2 路书导航三期推进；关键决策是路书导航采用纯手机自绘方案，不接入任何第三方地图 SDK，从而无需注册开发者、无需申请 key、完全离线可用。</p>
+</div>
+
+<h1 id="s1">一、文档概述</h1>
+
+<h2>1.1 背景与目标</h2>
+<p>当前应用是一款基于 Flutter 的纯离线电助力自行车码表，核心能力集中在实时显示（速度、里程、均速、极速、电量、温度、倾角）与蓝牙助力控制（含 BR80 闪控）。但数据仅在本次连接期间存在，断线或重启即清零，不具备任何“记录”能力。</p>
+<p>对标 Strava、行者等主流骑行应用后，本次立项为应用补齐骑行数据记录闭环。目标是在不依赖任何外接传感器、不联网、不登录的前提下，让手机独立完成“记录—存储—分析—导航”的完整链路，覆盖成熟骑行应用约 60% 至 70% 的核心价值。</p>
+
+<h2>1.2 范围界定</h2>
+<p>本期只实现“仅靠手机硬件即可完成”的能力。手机可直接获得 GPS 定位、加速度计、本地存储与网络（可选）；由此可采集轨迹、速度、距离、时长、海拔，并经算法衍生出爬升、坡度、卡路里、估算功率等指标。</p>
+<p>心率带、踏频器、功率计、胎压传感器等外接设备所提供的数据，手机硬件无法测量，本期不实现，仅在数据模型中预留字段作为后期扩展。现有电机控制器与 BR80 闪控的蓝牙连接属于项目本体，不在本次排除范围内。</p>
+
+<h2>1.3 名词说明</h2>
+<table class="plain-table">
+  <thead><tr><th>名词</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td>轨迹点</td><td>一次定位采样得到的经纬度、高程、速度、时间戳记录</td></tr>
+    <tr><td>路书</td><td>预先规划或由历史轨迹生成的有序路径点集合，用于导航跟随</td></tr>
+    <tr><td>PB</td><td>Personal Best，个人最佳成绩</td></tr>
+    <tr><td>GCJ-02</td><td>国内合规地图采用的坐标系；WGS-84 为 GPS 原始坐标系</td></tr>
+  </tbody>
+</table>
+
+<h1 id="s2">二、产品定位与用户场景</h1>
+
+<h2>2.1 定位</h2>
+<p>一款“随身骑行记录仪 + 本地分析台”：安装即用、无需账号、完全离线、数据只存本机。它不追求 Strava 式的社交网络，而是把个人骑行数据完整、准确地沉淀下来。</p>
+
+<h2>2.2 核心用户场景</h2>
+<ol>
+  <li><strong>日常通勤与训练</strong>：打开应用即开始记录，骑完暂停保存，随时回看本次的距离、均速、爬升与轨迹。</li>
+  <li><strong>长途骑行复盘</strong>：按周/月/年查看里程统计与日历热力图，对比同一路线的历史成绩。</li>
+  <li><strong>陌生路线跟随</strong>：提前载入路书，骑行中沿轨迹引导，显示进度、剩余距离与偏航提醒，无需实时联网算路。</li>
+  <li><strong>数据交换</strong>：将骑行导出为 GPX 分享，或从外部导入 GPX 统一管理。</li>
+</ol>
+
+<h2>2.3 双模式形态（按连接状态切分）</h2>
+<p>应用以“是否连接助力器（电机控制器 / BR80 闪控）”为分水岭，在两种界面形态间切换，二者共用同一套 GPS 测速与里程内核。</p>
+<p><strong>纯码表模式（未连接助力器）</strong>：此时应用就是一台独立的骑行记录码表，面向没有助力器的普通骑行者，也是本期记录功能的主场。保留速度表盘/数码管、均速/极速/里程、骑行时间等 GPS 可驱动的信息；隐藏助力控制卡片（模式、百分比滑杆、加减键）、电量/温度/陀螺仪传感器行（其数据源本就来自控制器，未连接时并无实际数据）、以及设备页之外的助力相关设置项（重启设备、陀螺仪校准与自动读取、爬坡参数、蓝牙调试等）。腾出的空间留给骑行记录控制条与轨迹/坡度显示。演示模式在该形态下只演示速度，不再填充助力假数据。</p>
+<p><strong>助力完整模式（已连接助力器）</strong>：保留现有全部能力，含助力控制卡片、传感器行、设备页与全部设置项；骑行记录相关功能在此模式下同样可用。</p>
+<p><strong>切换机制</strong>：默认自动——连接建立即进入完整模式，连接断开即退回纯码表模式；同时在设置中提供“锁定纯码表模式”开关，手动锁定后即使已连接助力器也隐藏全部助力界面，供只想记录数据的用户使用。两种模式的切换不改变已经采集的骑行数据，记录不中断。</p>
+<div class="note">
+  <p>&nbsp;&nbsp;<strong>连接入口</strong>：纯码表模式保留底部“设备”标签但弱化其视觉权重，未连接时语义呈现为“连接助力器”，确保用户随时可以进入完整模式。设备页本身不隐藏，避免形成无法连接、无法回到完整模式的死路。</p>
+</div>
+
+<h1 id="s3">三、功能范围</h1>
+
+<h2>3.1 功能全景与覆盖状态</h2>
+<p>成熟骑行应用可归纳为六大模块。下表标注当前码表的覆盖情况。</p>
+<table class="plain-table">
+  <thead><tr><th>模块</th><th>典型能力</th><th>当前状态</th></tr></thead>
+  <tbody>
+    <tr><td>实时记录与显示</td><td>速度/里程/均速/极速、骑行时间、电量/温度/倾角</td><td>已具备</td></tr>
+    <tr><td>实时记录与显示</td><td>心率/踏频/功率、GPS 轨迹与累计爬升</td><td>本期补齐轨迹与爬升</td></tr>
+    <tr><td>数据记录与管理</td><td>单次汇总与保存、历史归档、生涯统计、GPX、多设备云同步</td><td>本期补前四项，不做云同步</td></tr>
+    <tr><td>分析与复盘</td><td>速度/海拔曲线、功率/心率区间、分段与 PB</td><td>本期补齐曲线与 PB</td></tr>
+    <tr><td>路线与导航</td><td>路书规划、离线导航、热门路线/热力图</td><td>本期做轻量路书跟随</td></tr>
+    <tr><td>竞赛与社交</td><td>路段排行榜、挑战勋章、俱乐部组队</td><td>不做</td></tr>
+  </tbody>
+</table>
+
+<h2>3.2 本期能力链路</h2>
+<p>功能按“数据从哪来、如何加工、如何落地”分为四层，全部在手机本地完成：</p>
+<ol>
+  <li><strong>手机原生能力</strong>：GPS 定位、加速度计、本地存储；网络仅作为可选增强。</li>
+  <li><strong>直接采集</strong>：轨迹点、速度与距离、海拔、时长与运动状态。</li>
+  <li><strong>算法衍生</strong>：累计爬升与坡度（高程差分加滤波）、分段与 PB、卡路里（体重加 MET 模型）、估算功率（速度、坡度与风阻模型）。</li>
+  <li><strong>落地功能</strong>：骑行记录与汇总、历史与轨迹回放、速度/海拔分析图表、路书导航与 GPX 交换。</li>
+</ol>
+
+<h2>3.3 明确不做</h2>
+<p>云同步与账号体系、社交/排行榜/组队、在线地图瓦片与热门路线、实时 turn-by-turn 算路、外接传感器接入。</p>
+
+<h1 id="s4">四、功能需求详述</h1>
+
+<h2>4.1 骑行记录</h2>
+<p>提供“开始 / 暂停 / 继续 / 结束”四态状态机。开始后按固定间隔采集 GPS 轨迹点并持久化；暂停时不记点、不计里程；结束时生成一次骑行汇总。汇总字段包括总时长、移动时长、总距离、移动均速、极速、累计爬升、最高海拔、起止时间与轨迹点数量。移动均速须排除停止时间，避免等红灯拉低数值。</p>
+<p>要求后台持续记录，采用 Android 前台服务保活并显示常驻通知；对 GPS 漂移点（精度差、距离跳变、速度异常）做过滤，与现有 <code>GpsService</code> 的过滤策略保持一致。</p>
+
+<h2>4.2 本地历史与回放</h2>
+<p>以时间倒序列表展示历史骑行，每条显示日期、距离、时长、均速与轨迹缩略图。详情页在地图上回放完整轨迹，并叠加当前位置随时间移动的动画。列表支持按日期范围筛选与删除单条记录。</p>
+
+<h2>4.3 数据分析</h2>
+<p>详情页提供速度曲线与海拔剖面图，横轴为距离或时间。标注每公里分段（split）用时与速度；计算并展示 1 公里、5 公里等项目的最佳成绩。统计页给出周/月/年里程与次数、日历热力图，帮助用户观察训练节奏。</p>
+
+<h2>4.4 GPX 导入导出</h2>
+<p>支持将一次骑行导出为标准 GPX 文件（含轨迹点与时间、高程信息），便于外部浏览或备份；支持导入外部 GPX 并纳入本地历史统一管理。导入时需处理坐标系差异（见 5.5）。</p>
+
+<h2>4.5 路书导航</h2>
+<p>用户可将历史轨迹“另存为路书”，或导入外部 GPX 路书。导航过程中只做三件事：将当前位置投影到路线折线以计算进度与剩余距离；检测偏离路线并在超过阈值时提醒；接近关键点（路口、补给点）时给出提示。显示层呈现路线折线、当前位置与关键点标记。</p>
+
+<h1 id="s5">五、关键技术方案</h1>
+
+<h2>5.1 数据模型</h2>
+<p>核心实体建议为：<code>Ride</code>（一次骑行，含汇总字段与起止时间）、<code>TrackPoint</code>（轨迹点，含经纬度、高程、速度、时间戳、归属 Ride）、<code>Route</code>（路书，含名称与点序列）、<code>RiderProfile</code>（体重等用于卡路里估算的配置）。</p>
+<p>现有 <code>BikeData</code> 已含 <code>assistPower</code>、<code>motorPower</code>、<code>temperature</code> 等字段，新增模型应确保心率、踏频、功率、胎压等字段有预留位置，便于后期外接设备接入而不改动表结构。</p>
+
+<h2>5.2 存储方案</h2>
+<p>结构化数据采用本地 SQLite（如 Drift 或 sqflite），GPX 以文件形式存于应用私有目录，<code>SharedPreferences</code> 保存用户配置。轨迹点数据量较大，建议按距离或时间做抽稀后再落库，以平衡精度与存储/性能开销。</p>
+
+<h2>5.3 前台服务与功耗</h2>
+<p>持续 GPS 采样是耗电主因。建议在保证轨迹质量的前提下合理设置采样间隔（如每秒一次或按距离触发），并在停止移动时降低采样频率。前台服务须处理 App 被系统回收后的恢复与断点续记。</p>
+
+<h2>5.4 路书导航方案选型</h2>
+<p>曾评估三条路线：其一，由外部导航应用回传精简数据——Android 无稳定公开通道，通知监听或无障碍方案脆弱且涉及敏感权限，予以排除；其二，应用内集成完整导航 SDK——体验完整但包体大、需联网算路、与离线定位相悖，留待后期；其三，应用内路书跟随导航——只做位置投影、偏航与进度，不需实时算路，可完全离线，复用现有 GPS 流与里程算法，与产品定位最契合。</p>
+<div class="note">
+  <p>&nbsp;&nbsp;<strong>本期选择方案三，并采用自绘轨迹图</strong>：用 <code>CustomPainter</code> 将坐标投影到屏幕，绘制路线折线、当前位置与关键点，不接入任何第三方地图 SDK，因此无需注册开发者、无需申请 key、无需联网。架构上须将绘制层抽象为统一接口（如 <code>RouteMapRenderer</code>），导航状态机、偏航算法与进度计算只依赖该接口；将来升级为真实街道底图时，只替换绘制层实现，导航核心代码不变。</p>
+</div>
+
+<h2>5.5 坐标与合规</h2>
+<p>自绘方案下坐标全程统一使用 GPS 原始的 WGS-84，不叠加第三方底图，故不存在坐标系偏移问题。若后期引入底图，须遵守国内地图数据合规要求：底图服务仅限腾讯地图（默认）、高德、百度、天地图等具备资质的厂商，禁用 Google、Mapbox、OpenStreetMap 海外瓦片等来源；同时须将 WGS-84 转换为 GCJ-02，否则会产生数百米偏移。地图 key 由使用者自行到对应开放平台申请，代码中不预置任何有效 key。</p>
+
+<h1 id="s6">六、分期与里程碑</h1>
+<table class="plain-table">
+  <thead><tr><th>阶段</th><th>范围</th><th>交付价值</th></tr></thead>
+  <tbody>
+    <tr><td>P0 核心闭环</td><td>骑行记录状态机、轨迹落库、前台服务、本地历史列表与轨迹回放、基础汇总</td><td>数据不再丢失，可回看每次骑行</td></tr>
+    <tr><td>P1 分析与交换</td><td>速度/海拔曲线、分段与 PB、统计热力图、GPX 导入导出、卡路里与爬升</td><td>从“记录”升级为“复盘分析”</td></tr>
+    <tr><td>P2 路书导航</td><td>路书生成与导入、RouteMapRenderer 自绘、进度/偏航/关键点提示</td><td>离线跟随导航，补齐导航能力</td></tr>
+  </tbody>
+</table>
+<p class="section-end">P0 是后续一切能力的基础，应优先保证记录准确性与稳定性。P1、P2 可在 P0 稳定后并行推进。</p>
+
+<h1 id="s7">七、风险与约束</h1>
+<ol>
+  <li><strong>GPS 精度与耗电</strong>：城市峡谷、树荫下精度下降，冷启动较慢；持续记录耗电明显。需通过过滤算法、采样策略与前台服务保活缓解，并在界面上如实提示定位状态。</li>
+  <li><strong>爬升精度</strong>：仅靠 GPS 高程存在数米级抖动，须做阈值滤波避免虚增；若设备自带气压计可作为后期增强。</li>
+  <li><strong>数据安全</strong>：骑行轨迹属于个人位置信息，仅保存在本机，不采集、不上传他人数据，符合个人信息保护要求。</li>
+  <li><strong>升级路径</strong>：路书导航须在一开始就做好绘制层抽象，避免后期接底图时大规模返工。</li>
+</ol>
+
+<h1 id="s8">八、验收标准（要点）</h1>
+<ul>
+  <li>一次完整骑行可被正确记录并保存，重启应用后历史仍在；暂停期间不计里程。</li>
+  <li>汇总中的距离、均速、极速、爬升与原始轨迹一致，计算规则明确可复核。</li>
+  <li>轨迹地图可完整回放，速度/海拔曲线与轨迹时间戳对应。</li>
+  <li>GPX 导出文件可被第三方软件正确打开，导入后数据进入本地历史。</li>
+  <li>路书导航可显示进度、剩余距离并在偏航时提醒；全程无需联网与第三方账号。</li>
+  <li>未连接助力器时进入纯码表模式：助力卡片、控制器传感器行与助力类设置项均隐藏，且不影响骑行记录；连接后自动恢复完整模式，断开后自动退回，手动锁定开关优先于连接状态。</li>
+  <li>全部功能在无网络、无登录状态下可用，个人数据仅存本机。</li>
+</ul>
+
+</section>
+
+</body>
+</html>

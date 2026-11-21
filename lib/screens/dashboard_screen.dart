@@ -15,10 +15,12 @@ import '../services/ble_service.dart';
 import '../services/br80_protocol.dart';
 import '../services/br80_service.dart';
 import '../services/demo_mode_settings.dart';
+import '../services/display_mode_settings.dart';
 import '../services/gps_service.dart';
 import '../theme/dashboard_theme.dart';
 import '../theme/sensor_status.dart';
 import '../widgets/app_dialogs.dart';
+import '../widgets/ride_record_bar.dart';
 import '../widgets/needle_speedometer.dart';
 import '../widgets/segment_display.dart';
 
@@ -44,6 +46,9 @@ class DashboardScreen extends StatefulWidget {
   const DashboardScreen({
     super.key,
     this.onOpenDevices,
+    this.onOpenHistory,
+    this.onStartRide,
+    this.onFinishRide,
     this.demoClock,
     this.showStartupSweep = false,
   });
@@ -52,6 +57,13 @@ class DashboardScreen extends StatefulWidget {
 
   /// 未连接时点「去连接」跳到设备页（由外层底部导航切换）
   final VoidCallback? onOpenDevices;
+
+  /// 打开骑行历史页
+  final VoidCallback? onOpenHistory;
+
+  /// 骑行记录：开始 / 结束（含汇总弹层）
+  final Future<void> Function()? onStartRide;
+  final Future<void> Function()? onFinishRide;
 
   /// 演示数据的时间源；仅供测试注入固定/可推进的时钟，生产环境用系统时间。
   final DateTime Function()? demoClock;
@@ -143,13 +155,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Consumer3<BleService, GpsService, DemoModeSettings>(
-      builder: (context, ble, gps, demoSettings, _) {
+    return Consumer4<BleService, GpsService, DemoModeSettings, DisplayModeSettings>(
+      builder: (context, ble, gps, demoSettings, displayMode, _) {
         // 连上真实控制器后自动切回真实数据，演示数据只在断连时生效。
         final demo = demoSettings.isActive(ble.isConnected);
         // 演示数据每次重建都按当前时间取一组值，配合 500ms 刷新形成循环动画。
         final demoNow = widget.demoClock?.call() ?? DateTime.now();
         final data = demo ? DemoRideData.bikeData(demoNow) : ble.bikeData;
+
+        // 分水岭：控制器 / 闪控任一连接即完整模式；锁定开关优先。
+        // 演示模式视为「虚拟连接」——它存在的意义就是预览完整助力界面，
+        // 因此演示开启时不进入纯码表模式，继续展示助力卡与传感器演示数据。
+        final remote = context.watch<Br80Service>();
+        final isPure = !demo &&
+            displayMode.isPureComputer(
+              controllerConnected: ble.isConnected,
+              remoteConnected: remote.isConnected,
+            );
+
         return LayoutBuilder(
           builder: (context, constraints) {
             final h = constraints.maxHeight;
@@ -168,8 +191,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   _buildSubTable(ble, gps, data, scale, demo,
                       collapsed: _speedPage == 0),
                   _buildSpeedPageIndicator(scale),
-                  _buildAssistCard(ble, scale, demo),
-                  _buildSensorRow(data, scale),
+                  // 记录控制条：两种模式都显示；纯码表模式占据主位（非紧凑）。
+                  RideRecordBar(
+                    scale: scale,
+                    compact: !isPure,
+                    onStart: () => widget.onStartRide?.call(),
+                    onFinish: () => widget.onFinishRide?.call(),
+                    onViewHistory: widget.onOpenHistory,
+                    onConnectAssist: isPure ? widget.onOpenDevices : null,
+                  ),
+                  // 纯码表模式隐藏助力卡与传感器行；腾出的空间给记录控制条与表盘。
+                  if (!isPure) ...[
+                    _buildAssistCard(ble, scale, demo),
+                    _buildSensorRow(data, scale),
+                  ],
                   _buildVersionLine(scale),
                 ],
               ),

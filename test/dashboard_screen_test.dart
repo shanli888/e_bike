@@ -9,7 +9,10 @@ import 'package:bike_computer/services/ble_service.dart';
 import 'package:bike_computer/services/br80_protocol.dart';
 import 'package:bike_computer/services/br80_service.dart';
 import 'package:bike_computer/services/demo_mode_settings.dart';
+import 'package:bike_computer/services/display_mode_settings.dart';
 import 'package:bike_computer/services/gps_service.dart';
+import 'package:bike_computer/services/ride_recorder.dart';
+import 'package:bike_computer/services/ride_repository.dart';
 import 'package:bike_computer/services/ride_time_service.dart';
 import 'package:bike_computer/theme/dashboard_theme.dart';
 import 'package:bike_computer/theme/sensor_status.dart';
@@ -178,6 +181,11 @@ Widget _wrap(
           create: (_) => steps ?? AssistStepSettings()),
       ChangeNotifierProvider<DemoModeSettings>(
           create: (_) => demo ?? DemoModeSettings()),
+      ChangeNotifierProvider<DisplayModeSettings>(
+          create: (_) => DisplayModeSettings()),
+      Provider<RideRepository>(create: (_) => RideRepository()),
+      ChangeNotifierProvider<RideRecorder>(
+          create: (ctx) => RideRecorder(ctx.read<RideRepository>())),
     ],
     child: child,
   );
@@ -842,7 +850,7 @@ void main() {
     connected.dispose();
   });
 
-  testWidgets('未连接时助力卡显示去连接入口并可跳转设备页', (tester) async {
+  testWidgets('未连接时进入纯码表模式，隐藏助力卡并显示连接助力器入口', (tester) async {
     var opened = 0;
     final ble = BleService();
     ble.bikeData.clearReadOnlyAvailability();
@@ -852,10 +860,14 @@ void main() {
       GpsService(),
     ));
 
-    expect(find.text('未连接控制器'), findsOneWidget);
-    expect(find.text('去连接'), findsOneWidget);
+    // 分水岭：未连接 → 纯码表模式，助力卡与传感器行隐藏。
+    expect(find.text('未连接控制器'), findsNothing);
+    expect(find.text('去连接'), findsNothing);
     expect(_key('demo-badge'), findsNothing);
-    await tester.tap(find.text('去连接'));
+    // 记录主场与轻量连接入口可见
+    expect(find.text('开始骑行'), findsOneWidget);
+    expect(find.text('连接助力器'), findsOneWidget);
+    await tester.tap(find.text('连接助力器'));
     await tester.pump();
     expect(opened, 1);
 
