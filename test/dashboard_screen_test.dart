@@ -704,18 +704,51 @@ void main() {
     final connected = _ConnectedBleService(ble);
     await tester.pumpWidget(_wrap(_screen(), connected, GpsService()));
 
-    expect(_key('mode-manual'), findsOneWidget);
+    expect(_key('mode-manual'), findsOneWidget); // 当前模式的触发按钮
     expect(find.byType(Slider), findsOneWidget);
     expect(_key('assist-plus'), findsOneWidget);
     expect(_key('assist-minus'), findsOneWidget);
     expect(find.byIcon(Icons.add), findsOneWidget);
     expect(find.byIcon(Icons.remove), findsOneWidget);
 
-    await tester.tap(_key('mode-commute'));
+    // 模式按钮已改为径向弹出菜单：点触发按钮展开，再点通勤项。
+    await tester.tap(_key('mode-manual'));
+    await tester.pumpAndSettle();
+    expect(_key('mode-menu-commute'), findsOneWidget);
+    await tester.tap(_key('mode-menu-commute'));
     await tester.pumpAndSettle();
     expect(connected.requestedModes, [AssistMode.commute]);
     expect(find.text('确认切换助力模式'), findsNothing);
     expect(find.text('未确认车辆静止'), findsNothing);
+
+    // 选择后菜单自动收起。
+    expect(_key('mode-menu-commute'), findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    connected.dispose();
+  });
+
+  testWidgets('径向模式菜单：点触发按钮展开 5 项，点空白处收起', (tester) async {
+    final ble = BleService();
+    final connected = _ConnectedBleService(ble);
+    await tester.pumpWidget(_wrap(_screen(), connected, GpsService()));
+
+    // 默认收起：菜单项不在树中，当前模式触发按钮在树中。
+    expect(_key('mode-menu-manual'), findsNothing);
+    expect(_key('mode-manual'), findsOneWidget);
+
+    // 展开：5 个模式项全部出现。
+    await tester.tap(_key('mode-manual'));
+    await tester.pumpAndSettle();
+    for (final mode in AssistMode.values) {
+      expect(_key('mode-menu-${mode.name}'), findsOneWidget,
+          reason: '径向菜单应包含 ${mode.label}');
+    }
+
+    // 点空白处（菜单遮罩）收起。
+    await tester.tapAt(const Offset(20, 20));
+    await tester.pumpAndSettle();
+    expect(_key('mode-menu-manual'), findsNothing);
 
     await tester.pumpWidget(const SizedBox.shrink());
     connected.dispose();

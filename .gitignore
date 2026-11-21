@@ -24,6 +24,7 @@
 /output/ui-design/prototype_check*.png
 /output/ui-design/final_*.png
 /output/ui-design/diag_*.png
+/output/ui-design/v2_*.png
 
 # Miscellaneous
 *.class

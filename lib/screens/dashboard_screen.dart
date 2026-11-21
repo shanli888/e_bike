@@ -20,6 +20,7 @@ import '../services/gps_service.dart';
 import '../theme/dashboard_theme.dart';
 import '../theme/sensor_status.dart';
 import '../widgets/app_dialogs.dart';
+import '../widgets/radial_mode_menu.dart';
 import '../widgets/ride_record_bar.dart';
 import '../widgets/needle_speedometer.dart';
 import '../widgets/segment_display.dart';
@@ -88,6 +89,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String? _pendingCommand;
   double? _percentDraft;
   String _version = '--';
+
+  /// 径向模式菜单是否展开。触发按钮位置由 [_modeTriggerKey] 实时测量，
+  /// 作为菜单弧线的圆心（跟随助力卡内的按钮，不受布局缩放影响）。
+  bool _modeMenuOpen = false;
+  final GlobalKey _modeTriggerKey = GlobalKey();
 
   /// 演示模式下的助力控件状态：只存在于 State，不写入 BleService。
   AssistMode? _demoMode;
@@ -176,36 +182,69 @@ class _DashboardScreenState extends State<DashboardScreen> {
         return LayoutBuilder(
           builder: (context, constraints) {
             final h = constraints.maxHeight;
+            final w = constraints.maxWidth;
             final scale =
                 (h.isFinite ? h / _designContentHeight : 1.0).clamp(0.55, 1.15);
+            // 上半屏给码表：Expanded 吸收剩余空间，竖屏下自然约占一半；
+            // 扁屏（如测试 800×600）时自动收缩让位给下半，避免溢出。
+            final upper = Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(child: _buildSpeedHero(ble, gps, data, scale, demo)),
+                _buildSubTable(ble, gps, data, scale, demo,
+                    collapsed: _speedPage == 0),
+                _buildSpeedPageIndicator(scale),
+              ],
+            );
+            final lower = Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // 记录控制条：两种模式都显示；纯码表模式占据主位（非紧凑）。
+                RideRecordBar(
+                  scale: scale,
+                  compact: !isPure,
+                  onStart: () => widget.onStartRide?.call(),
+                  onFinish: () => widget.onFinishRide?.call(),
+                  onViewHistory: widget.onOpenHistory,
+                  onConnectAssist: isPure ? widget.onOpenDevices : null,
+                ),
+                // 纯码表模式隐藏助力区；腾出的空间给记录控制条与表盘。
+                if (!isPure) _buildMergedAssistArea(ble, data, scale, demo),
+                _buildVersionLine(scale),
+              ],
+            );
+            final content = Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(child: upper),
+                lower,
+              ],
+            );
             return DecoratedBox(
               decoration:
                   const BoxDecoration(gradient: DashColors.pageBackground),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+              // 径向菜单作为浮层覆盖整页，背景由菜单自身做模糊压暗。
+              child: Stack(
+                fit: StackFit.expand,
                 children: [
-                  // 速度区吃掉剩余空间（规格 218px）
-                  Expanded(child: _buildSpeedHero(ble, gps, data, scale, demo)),
-                  // 表盘页走极简沉浸模式：收起 AVG/MAX/km 一排，把空间让给放大后的表盘。
-                  // 数字页保持原样。widget 仍在树中（高度归零 + 裁剪），既有断言不受影响。
-                  _buildSubTable(ble, gps, data, scale, demo,
-                      collapsed: _speedPage == 0),
-                  _buildSpeedPageIndicator(scale),
-                  // 记录控制条：两种模式都显示；纯码表模式占据主位（非紧凑）。
-                  RideRecordBar(
-                    scale: scale,
-                    compact: !isPure,
-                    onStart: () => widget.onStartRide?.call(),
-                    onFinish: () => widget.onFinishRide?.call(),
-                    onViewHistory: widget.onOpenHistory,
-                    onConnectAssist: isPure ? widget.onOpenDevices : null,
-                  ),
-                  // 纯码表模式隐藏助力卡与传感器行；腾出的空间给记录控制条与表盘。
-                  if (!isPure) ...[
-                    _buildAssistCard(ble, scale, demo),
-                    _buildSensorRow(data, scale),
-                  ],
-                  _buildVersionLine(scale),
+                  content,
+                  if (_modeMenuOpen)
+                    Positioned.fill(
+                      child: RadialModeMenu(
+                        origin: _modeOrigin(w),
+                        selected: demo
+                            ? (_demoMode ?? AssistMode.manual)
+                            : ble.assistMode,
+                        enabled: demo || ble.isConnected,
+                        scale: scale,
+                        onSelected: (mode) =>
+                            _chooseAssistMode(ble, mode, demo),
+                        onDismiss: () {
+                          if (mounted) setState(() => _modeMenuOpen = false);
+                        },
+                      ),
+                    ),
                 ],
               ),
             );
@@ -213,6 +252,31 @@ class _DashboardScreenState extends State<DashboardScreen> {
         );
       },
     );
+  }
+
+  /// 径向菜单圆心 = 模式触发按钮中心，换算到最外层 Stack 的局部坐标。
+  /// 按钮尚未布局（如首帧）时回退到页面中部偏下，避免菜单飞出屏幕。
+  Offset _modeOrigin(double width) {
+    final ctx = _modeTriggerKey.currentContext;
+    final render = ctx?.findRenderObject();
+    if (render is RenderBox && render.hasSize) {
+      final center = render.localToGlobal(render.size.center(Offset.zero));
+      final parent = context.findRenderObject();
+      if (parent is RenderBox) return parent.globalToLocal(center);
+    }
+    return Offset(width * 0.5, 0);
+  }
+
+  /// 径向菜单选择模式：演示态只改本地 state，真实态走既有下发链路。
+  void _chooseAssistMode(BleService ble, AssistMode mode, bool demo) {
+    if (demo) {
+      setState(() {
+        _demoMode = mode;
+        _percentDraft = null;
+      });
+    } else {
+      _runCommand(ble, () => ble.setAssistMode(mode), '模式 ${mode.label}');
+    }
   }
 
   /// 速度来源图标：GPS 用定位图标（绿），蓝牙用蓝牙图标（蓝）。
@@ -587,12 +651,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
       );
 
   /// 助力控制卡片：整页唯一暖色高亮块（规格 §2.5）
-  Widget _buildAssistCard(BleService ble, double s, bool demo) {
-    // Keep room for the slider's minimum touch height on short displays.
-    final sliderExtra = (kMinInteractiveDimension - 48 * s)
-        .clamp(0.0, kMinInteractiveDimension);
+  /// 合并后的助力控制大区域：一个大卡片内自上而下容纳
+  /// 标题 + 模式触发按钮、滑杆控制、以及压缩的电量/温度/陀螺仪一排。
+  /// 内部复用既有构建方法，保留全部 key / 文本 / 语义，测试与无障碍不受影响。
+  Widget _buildMergedAssistArea(
+      BleService ble, BikeData data, double s, bool demo) {
     return Container(
-      height: 212 * s + sliderExtra,
       margin: EdgeInsets.symmetric(horizontal: 16 * s),
       decoration: BoxDecoration(
         gradient: DashColors.assistBorder,
@@ -604,12 +668,67 @@ class _DashboardScreenState extends State<DashboardScreen> {
           gradient: DashColors.assistFill,
           borderRadius: BorderRadius.circular(15 * s),
         ),
-        padding: EdgeInsets.fromLTRB(16 * s, 14 * s, 16 * s, 12 * s),
-        child: ble.isConnected
-            ? _buildAssistBody(ble, s, demo: false)
-            : (demo
-                ? _buildAssistBody(ble, s, demo: true)
-                : _buildConnectPrompt(ble, s)),
+        padding: EdgeInsets.fromLTRB(14 * s, 12 * s, 14 * s, 10 * s),
+        child: ble.isConnected || demo
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _buildAssistBody(ble, s, demo: demo),
+                  // 内嵌传感器一排：去掉外层 margin，用细分隔线与助力控制区隔。
+                  Padding(
+                    padding: EdgeInsets.only(top: 10 * s),
+                    child: _buildSensorStrip(data, s),
+                  ),
+                ],
+              )
+            : _buildConnectPrompt(ble, s),
+      ),
+    );
+  }
+
+  /// 传感器紧凑一排：电量 / 温度 / 陀螺仪，均复用既有卡片与 key。
+  /// 高度较独立卡片行压缩，以适配合并后的大助力区。
+  Widget _buildSensorStrip(BikeData data, double s) {
+    final battery = data.batteryLevelAvailable
+        ? data.batteryLevel.clamp(0, 100).toInt()
+        : null;
+    final voltage = data.voltage > 0 ? data.voltage.toStringAsFixed(1) : null;
+    final temp = data.temperatureAvailable ? data.controllerTemperature : null;
+    final slope = data.gyroAngleAvailable ? data.slope : null;
+    return SizedBox(
+      height: 109 * s,
+      child: Row(
+        children: [
+          _buildBatteryCard(battery, voltage, s),
+          SizedBox(width: 8 * s),
+          _buildSensorCard(
+            keyName: 'temperature',
+            title: '温度',
+            accent: SensorStatus.temperatureColor(temp),
+            badge: SensorStatus.temperatureBandLabel(temp),
+            segments: temp == null ? 0 : (temp / 10).round().clamp(0, 10),
+            value: temp?.toStringAsFixed(1),
+            unit: '℃',
+            s: s,
+          ),
+          SizedBox(width: 8 * s),
+          _buildSensorCard(
+            keyName: 'gyro',
+            title: '陀螺仪',
+            accent: DashColors.blue,
+            bar: slope == null
+                ? const SlopeBar(hasData: false)
+                : SlopeBar(
+                    hasData: true,
+                    side: slope < 0 ? -1 : (slope > 0 ? 1 : 0),
+                    level: (slope.abs() / 5).round().clamp(0, 5),
+                  ),
+            value: slope?.toStringAsFixed(1),
+            unit: '°',
+            s: s,
+          ),
+        ],
       ),
     );
   }
@@ -671,13 +790,61 @@ class _DashboardScreenState extends State<DashboardScreen> {
               fontSize: 12.5 * s),
         ),
         SizedBox(height: 10 * s),
-        _buildModeRow(ble, modeEnabled, s, selected: mode, demo: demo),
+        _buildModeTrigger(ble, modeEnabled, s, selected: mode, demo: demo),
         SizedBox(height: 10 * s),
         _buildControlRow(ble, controlsEnabled, manual, percent, step, s,
             demo: demo,
             level: level,
             pressedDirection: scheduler.pressedDirection),
       ],
+    );
+  }
+
+  /// 模式触发按钮：显示当前模式，点击弹出圆形径向菜单。
+  /// 保留 `mode-<name>` key 供既有测试定位（当前模式即触发按钮）。
+  Widget _buildModeTrigger(BleService ble, bool enabled, double s,
+      {required AssistMode selected, required bool demo}) {
+    return Semantics(
+      button: true,
+      label: '切换助力模式，当前${selected.label}',
+      child: GestureDetector(
+        key: ValueKey('mode-${selected.name}'),
+        onTap: enabled
+            ? () {
+                // 先让按钮完成布局，确保 _modeOrigin 能量到圆心。
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted) setState(() => _modeMenuOpen = true);
+                });
+              }
+            : null,
+        child: Container(
+          key: _modeTriggerKey,
+          height: 42 * s,
+          padding: EdgeInsets.symmetric(horizontal: 12 * s),
+          decoration: BoxDecoration(
+            gradient: DashColors.modeSelected,
+            borderRadius: BorderRadius.circular(11 * s),
+            border: Border.all(color: DashColors.orange.withValues(alpha: 0.48)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(selected.icon, size: 17 * s, color: DashColors.orange),
+              SizedBox(width: 8 * s),
+              Text(
+                '${selected.label}模式',
+                style: TextStyle(
+                  color: DashColors.orange,
+                  fontSize: 13 * s,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              SizedBox(width: 4 * s),
+              Icon(Icons.expand_more, size: 16 * s, color: DashColors.orange),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -693,68 +860,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
       _percentDraft = null;
     });
-  }
-
-  /// 模式按钮行：5 个上下结构按钮，手动默认选中
-  Widget _buildModeRow(BleService ble, bool enabled, double s,
-      {required AssistMode selected, required bool demo}) {
-    return Row(
-      children: [
-        for (var i = 0; i < AssistMode.values.length; i++) ...[
-          if (i > 0) SizedBox(width: 7 * s),
-          Expanded(
-              child: _buildModeChip(
-                  ble, enabled, AssistMode.values[i], s, selected, demo)),
-        ],
-      ],
-    );
-  }
-
-  Widget _buildModeChip(BleService ble, bool enabled, AssistMode mode, double s,
-      AssistMode currentMode, bool demo) {
-    final selected = currentMode == mode;
-    const ink = DashColors.orange;
-    return GestureDetector(
-      key: ValueKey('mode-${mode.name}'),
-      onTap: enabled
-          ? (demo
-              ? () => setState(() {
-                    _demoMode = mode;
-                    _percentDraft = null;
-                  })
-              : () => _runCommand(
-                  ble, () => ble.setAssistMode(mode), '模式 ${mode.label}'))
-          : null,
-      child: Container(
-        height: 48 * s,
-        decoration: BoxDecoration(
-          gradient: selected ? DashColors.modeSelected : null,
-          color: selected ? null : Colors.white.withValues(alpha: 0.055),
-          borderRadius: BorderRadius.circular(11 * s),
-          border: Border.all(
-            color: selected
-                ? DashColors.orange.withValues(alpha: 0.48)
-                : DashColors.line,
-          ),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(mode.icon,
-                size: 15 * s, color: selected ? ink : DashColors.muted2),
-            SizedBox(height: 3 * s),
-            Text(
-              mode.label,
-              maxLines: 1,
-              style: TextStyle(
-                  color: selected ? ink : DashColors.muted2,
-                  fontSize: 11 * s,
-                  fontWeight: FontWeight.w600),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
   Widget _buildControlRow(BleService ble, bool enabled, bool manual,
@@ -931,55 +1036,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
             color: active
                 ? const Color(0xFF20160A)
                 : Colors.white.withValues(alpha: enabled ? 0.85 : 0.2)),
-      ),
-    );
-  }
-
-  /// 传感器卡片行：电量 / 温度 / 陀螺仪（坡度）。
-  ///
-  /// 电量与温度按档位变色（见 [SensorStatus]）；电量卡额外显示连续进度条，
-  /// 温度沿用 10 格单向分段条；陀螺仪改用 11 格双向条，从中心零点向两侧填充。
-  Widget _buildSensorRow(BikeData data, double s) {
-    final battery = data.batteryLevelAvailable
-        ? data.batteryLevel.clamp(0, 100).toInt()
-        : null;
-    final voltage = data.voltage > 0 ? data.voltage.toStringAsFixed(1) : null;
-    final temp = data.temperatureAvailable ? data.controllerTemperature : null;
-    final slope = data.gyroAngleAvailable ? data.slope : null;
-    return Container(
-      height: 109 * s,
-      margin: EdgeInsets.fromLTRB(16 * s, 14 * s, 16 * s, 0),
-      child: Row(
-        children: [
-          _buildBatteryCard(battery, voltage, s),
-          SizedBox(width: 8 * s),
-          _buildSensorCard(
-            keyName: 'temperature',
-            title: '温度',
-            accent: SensorStatus.temperatureColor(temp),
-            badge: SensorStatus.temperatureBandLabel(temp),
-            segments: temp == null ? 0 : (temp / 10).round().clamp(0, 10),
-            value: temp?.toStringAsFixed(1),
-            unit: '℃',
-            s: s,
-          ),
-          SizedBox(width: 8 * s),
-          _buildSensorCard(
-            keyName: 'gyro',
-            title: '陀螺仪',
-            accent: DashColors.blue,
-            bar: slope == null
-                ? const SlopeBar(hasData: false)
-                : SlopeBar(
-                    hasData: true,
-                    side: slope < 0 ? -1 : (slope > 0 ? 1 : 0),
-                    level: (slope.abs() / 5).round().clamp(0, 5),
-                  ),
-            value: slope?.toStringAsFixed(1),
-            unit: '°',
-            s: s,
-          ),
-        ],
       ),
     );
   }
