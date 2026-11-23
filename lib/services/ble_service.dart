@@ -127,6 +127,27 @@ class BleService extends ChangeNotifier {
   bool _statusProbeCancelled = false;
   bool get statusProbeRunning => _statusProbeRunning;
 
+  /// IMEI 缺失告警只写一次，避免每次助力操作都刷同一条日志。
+  bool _lvbuConfigWarningLogged = false;
+
+  /// LVBU 的 C4/A5/C0 等命令都把 15 位电机 IMEI 编在帧里。
+  /// 构建时漏传 --dart-define-from-file=local_config.json 会让 parser 构造直接抛错，
+  /// 因此在所有入口先挡一层，返回明确的失败结果并留下可诊断日志。
+  bool _ensureLvbuImei(String action) {
+    if (LvbuProtocol.validImei(LvbuProtocol.motorImei)) return true;
+    if (!_lvbuConfigWarningLogged) {
+      _lvbuConfigWarningLogged = true;
+      _addLog(FrameLog(
+        time: DateTime.now(),
+        outgoing: false,
+        data: const [],
+        source: '未配置有效的电机 IMEI，$action 已取消；'
+            '请用 --dart-define-from-file=local_config.json 重新打包',
+      ));
+    }
+    return false;
+  }
+
   bool _protectLvbuIdentity(String source) =>
       _lvbuProbeRunning ||
       _lvbuReplyGuard ||
@@ -1731,14 +1752,7 @@ class BleService extends ChangeNotifier {
 
   void _startLvbuReadOnlyPolling(BluetoothDevice device) {
     _lvbuPoller?.stop();
-    if (!LvbuProtocol.validImei(LvbuProtocol.motorImei)) {
-      _addLog(FrameLog(
-          time: DateTime.now(),
-          outgoing: false,
-          data: const [],
-          source: '未配置有效的电机 IMEI，LVBU 查询已停用；请检查本地构建配置'));
-      return;
-    }
+    if (!_ensureLvbuImei('LVBU 只读查询')) return;
     _lvbuPoller = LvbuReadOnlyPoller(
       canRequest: () =>
           _isConnected &&
@@ -1949,7 +1963,7 @@ class BleService extends ChangeNotifier {
   Future<String> queryLvbuVoltage({bool silent = false}) async {
     final device = _connectedDevice;
     if (!_isConnected || device == null) return '请先连接设备';
-    if (!LvbuProtocol.validImei(LvbuProtocol.motorImei)) {
+    if (!_ensureLvbuImei('C0 电压查询')) {
       return '未配置有效的电机 IMEI，请检查本地构建配置';
     }
     if (_lvbuProbeRunning || _statusProbeRunning) return '正在读取其他数据，请稍后再试';
@@ -2242,6 +2256,7 @@ class BleService extends ChangeNotifier {
   /// 链路忙时等待其空闲后再发（停止助力的兜底恢复会用到）。
   Future<CommandResult> setAssistMode(AssistMode mode,
       {bool priority = false}) async {
+    if (!_ensureLvbuImei('C4 模式设置')) return CommandResult.writeFailed;
     if (_adapterState == BluetoothAdapterState.off) {
       return CommandResult.bluetoothOff;
     }
@@ -2436,6 +2451,7 @@ class BleService extends ChangeNotifier {
   ///   最多等 [_priorityWaitBudget]，而不是直接放弃。
   Future<CommandResult> setAssistPercent(int percent,
       {bool priority = false}) async {
+    if (!_ensureLvbuImei('A5 助力设置')) return CommandResult.writeFailed;
     if (_adapterState == BluetoothAdapterState.off) {
       return CommandResult.bluetoothOff;
     }

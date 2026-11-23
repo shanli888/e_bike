@@ -23,6 +23,7 @@ import 'services/screen_wake_lock.dart';
 import 'theme/dashboard_theme.dart';
 import 'widgets/app_dialogs.dart';
 import 'widgets/display_settings_sheet.dart';
+import 'widgets/recording_indicator.dart';
 import 'widgets/ride_summary_sheet.dart';
 import 'widgets/remote_glyph.dart';
 import 'widgets/segment_display.dart';
@@ -104,10 +105,15 @@ Future<void> main() async {
         Provider<RideRepository>.value(value: rideRepository),
         ChangeNotifierProvider<RideRecorder>.value(value: rideRecorder),
         ChangeNotifierProvider<RideTimeService>(
-          create: (ctx) => RideTimeService.fromServices(
-            ctx.read<BleService>(),
-            ctx.read<GpsService>(),
-          ),
+          create: (ctx) {
+            final recorder = ctx.read<RideRecorder>();
+            return RideTimeService.fromServices(
+              ctx.read<BleService>(),
+              ctx.read<GpsService>(),
+              // 点「开始骑行」后计时器即走字，与红点指示同步；暂停停走、结束归零。
+              recordState: () => recorder.state,
+            );
+          },
         ),
       ],
       child: const BikeComputerApp(),
@@ -277,14 +283,17 @@ class _MainScreenState extends State<MainScreen> {
   /// 演示模式（未连接 + 演示开关打开）按「数据正常」显示绿灯与连接态蓝牙图标。
   Widget _buildAppBarTitle(BleService ble, {required bool demo}) {
     final online = ble.isConnected;
+    // 未连接设备时，蓝牙图标与信号图标一样置灰（避免误以为已连接）。
+    final bluetoothColor =
+        online ? DashColors.sourceBluetooth : DashColors.muted;
     final signalColor = (online || demo) ? DashColors.green : DashColors.muted;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         Icon(
-          (online || demo) ? Icons.bluetooth_connected : Icons.bluetooth,
+          online ? Icons.bluetooth_connected : Icons.bluetooth,
           size: 17,
-          color: DashColors.sourceBluetooth,
+          color: bluetoothColor,
         ),
         const SizedBox(width: 5),
         Icon(Icons.signal_cellular_alt, size: 17, color: signalColor),
@@ -366,11 +375,13 @@ class _MainScreenState extends State<MainScreen> {
           Consumer2<BleService, DemoModeSettings>(
             builder: (context, ble, demoSettings, _) {
               final demo = demoSettings.isActive(ble.isConnected);
-              return Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _buildRideTimeIndicator(demo),
-                  const SizedBox(width: 14),
+          return Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const RecordingIndicator(),
+              const SizedBox(width: 12),
+              _buildRideTimeIndicator(demo),
+              const SizedBox(width: 14),
                   _buildCircleButton(
                     icon: Icons.settings_outlined,
                     color: DashColors.muted2,

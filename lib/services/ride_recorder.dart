@@ -16,17 +16,57 @@ enum RideRecordState {
   final String label;
 }
 
+/// GPS 速度自动暂停判定器（纯逻辑，便于单测）。
+///
+/// 带迟滞避免红绿灯处反复切换：速度 [pauseBelowKmh] 以下持续
+/// [pauseAfterSamples] 个采样点才暂停；速度回到 [resumeAboveKmh] 以上立即继续。
+class SpeedAutoPause {
+  SpeedAutoPause({
+    this.pauseBelowKmh = 2.5,
+    this.resumeAboveKmh = 5.0,
+    this.pauseAfterSamples = 3,
+  });
+
+  final double pauseBelowKmh;
+  final double resumeAboveKmh;
+  final int pauseAfterSamples;
+
+  int _lowCount = 0;
+  int get lowCount => _lowCount;
+
+  void reset() => _lowCount = 0;
+
+  /// 输入一帧速度（km/h），返回建议的状态；null 表示维持现状。
+  RideRecordState? feed(double speedKmh) {
+    if (speedKmh >= resumeAboveKmh) {
+      _lowCount = 0;
+      return RideRecordState.recording;
+    }
+    if (speedKmh < pauseBelowKmh) {
+      _lowCount++;
+      if (_lowCount >= pauseAfterSamples) return RideRecordState.paused;
+      return null;
+    }
+    // 中间速度带：保持当前状态，但清零低速计数（迟滞）。
+    _lowCount = 0;
+    return null;
+  }
+}
+
 /// 骑行记录器：一次骑行的开始 / 暂停 / 继续 / 结束状态机。
 ///
 /// 自己管理一条独立的定位流（bestForNavigation, 1s），与 GpsService 的测速流
 /// 解耦——这样无论速度来源是蓝牙还是 GPS，只要用户点了「开始骑行」就能记录
 /// 轨迹。定位权限在服务内检查，失败通过 [status] 暴露给 UI。
 ///
+/// 暂停/继续由 GPS 速度自动判定（[SpeedAutoPause]），用户只手动开始与结束。
+///
 /// 指标口径（与产品文档 §4 一致）：
 /// - 距离：相邻有效点的球面距离累加，过滤 >200m 的跳点与精度 >50m 的定位。
 /// - 移动时长：仅在速度 >0.5km/h 且未暂停时累加（沿用「有速度才算移动」）。
 /// - 均速：距离 / 移动时长；极速：取定位速度最大值。
 /// - 爬升/下降：相邻点高程差，绝对值 >1m 才计入（滤掉 GPS 高程抖动）。
+/// - 坡度：相邻有效点高程差 / 水平距离（百分比），EMA 平滑后展示。
 /// - 卡路里：MET 模型，骑行 MET=6.0，体重默认 70kg（预留设置）。
 class RideRecorder extends ChangeNotifier {
   RideRecorder(this._repository, {this.defaultWeightKg = 70.0});
@@ -34,6 +74,9 @@ class RideRecorder extends ChangeNotifier {
   final RideRepository _repository;
   final double defaultWeightKg;
   static const double _metCycling = 6.0;
+
+  /// GPS 速度自动暂停判定器；引擎无法单测私有方法，故直接内联到定位回调。
+  final SpeedAutoPause _autoPause = SpeedAutoPause();
 
   @override
   void notifyListeners() {
@@ -60,6 +103,23 @@ class RideRecorder extends ChangeNotifier {
   double _ascentM = 0;
   double _descentM = 0;
 
+  /// 实时坡度（百分比，上坡为正）。由相邻 GPS 点高程差 / 水平距离估算，
+  /// EMA 平滑以抑制 GPS 高程抖动；null 表示暂无有效数据。
+  double? _slopePercent;
+
+  /// 由相邻两点的高程差与水平距离估算坡度百分比。
+  /// 水平距离 <3m 或 >200m 时返回 null（噪声 / 跳点），结果夹到 ±100%。
+  static double? computeSlopePercent(double deltaAltM, double horizontalM) {
+    if (horizontalM < 3 || horizontalM > 200) return null;
+    final value = deltaAltM / horizontalM * 100;
+    if (!value.isFinite) return null;
+    return value.clamp(-100.0, 100.0);
+  }
+
+  /// 用新采样值对旧坡度做 EMA 平滑；首次直接用采样值。
+  static double smoothSlope(double? old, double raw) =>
+      old == null ? raw : old * 0.7 + raw * 0.3;
+
   final List<RidePoint> _points = <RidePoint>[];
   List<RidePoint> get points => List.unmodifiable(_points);
 
@@ -73,6 +133,7 @@ class RideRecorder extends ChangeNotifier {
       _moving.inSeconds > 0 ? _distanceKm / (_moving.inSeconds / 3600) : 0;
   double get maxSpeedKmh => _maxSpeedKmh;
   double get ascentM => _ascentM;
+  double? get slopePercent => _slopePercent;
   double get calories => (_metCycling * defaultWeightKg *
           (_moving.inSeconds / 3600))
       .round()
@@ -109,6 +170,8 @@ class RideRecorder extends ChangeNotifier {
     _maxSpeedKmh = 0;
     _ascentM = 0;
     _descentM = 0;
+    _slopePercent = null;
+    _autoPause.reset();
     _points.clear();
     _last = null;
     _state = RideRecordState.recording;
@@ -203,6 +266,8 @@ class RideRecorder extends ChangeNotifier {
     _maxSpeedKmh = 0;
     _ascentM = 0;
     _descentM = 0;
+    _slopePercent = null;
+    _autoPause.reset();
     _points.clear();
     _last = null;
     _status = '未开始';
@@ -228,6 +293,32 @@ class RideRecorder extends ChangeNotifier {
 
     final now = DateTime.now();
     final speedKmh = p.speed > 0 ? p.speed * 3.6 : 0.0;
+
+    // ① GPS 速度自动暂停/继续：带迟滞，红灯短暂停车不会立刻打断，
+    //    重新起步达阈值即自动续记。用户只需手动开始与结束。
+    final auto = _autoPause.feed(speedKmh);
+    if (auto == RideRecordState.paused && _state == RideRecordState.recording) {
+      _state = RideRecordState.paused;
+      _lastTick = null;
+    } else if (auto == RideRecordState.recording && _state == RideRecordState.paused) {
+      _state = RideRecordState.recording;
+      _lastTick = null;
+    }
+
+    // ② 实时坡度：相邻有效点的高程差 / 水平距离（百分比），EMA 平滑抑抖。
+    final prevForSlope = _last;
+    if (prevForSlope != null && p.accuracy <= 50) {
+      final meters = Geolocator.distanceBetween(
+        prevForSlope.latitude,
+        prevForSlope.longitude,
+        p.latitude,
+        p.longitude,
+      );
+      final raw = computeSlopePercent(p.altitude - prevForSlope.altitude, meters);
+      if (raw != null) {
+        _slopePercent = smoothSlope(_slopePercent, raw);
+      }
+    }
 
     // 采样点：暂停时也记录轨迹，但不累加移动指标（减速带/红灯不虚增里程）
     final shouldRecord = _shouldAddPoint(p);
@@ -275,7 +366,9 @@ class RideRecorder extends ChangeNotifier {
     }
 
     _last = p;
-    _status = '正在记录（精度 ${p.accuracy.toStringAsFixed(0)} m）';
+    _status = _state == RideRecordState.recording
+        ? '正在记录（精度 ${p.accuracy.toStringAsFixed(0)} m）'
+        : '低速自动暂停（精度 ${p.accuracy.toStringAsFixed(0)} m）';
     notifyListeners();
   }
 

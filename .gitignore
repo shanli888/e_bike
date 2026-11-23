@@ -25,6 +25,8 @@
 /output/ui-design/final_*.png
 /output/ui-design/diag_*.png
 /output/ui-design/v2_*.png
+/output/ui_verify_*.png
+/output/chart_golden.png
 
 # Miscellaneous
 *.class

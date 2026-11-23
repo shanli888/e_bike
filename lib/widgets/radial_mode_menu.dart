@@ -164,7 +164,8 @@ class _RadialModeMenuState extends State<RadialModeMenu>
 
   Widget _circle(AssistMode mode, double circle, double s) {
     final selected = mode == widget.selected;
-    final fg = selected ? const Color(0xFF1A1206) : DashColors.txt;
+    // modeSelected 是深棕渐变，选中项必须用亮橙色文字，否则深字压深底看不清。
+    final fg = selected ? DashColors.orange : DashColors.txt;
     return Semantics(
       button: true,
       selected: selected,

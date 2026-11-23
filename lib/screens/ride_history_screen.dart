@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../models/ride_record.dart';
 import '../services/ride_repository.dart';
 import '../theme/dashboard_theme.dart';
+import '../widgets/speed_elevation_chart.dart';
 
 /// 骑行历史列表页：生涯统计 + 每次骑行卡片，点击进入详情。
 class RideHistoryScreen extends StatefulWidget {
@@ -63,7 +64,7 @@ class _RideHistoryScreenState extends State<RideHistoryScreen> {
                     padding: const EdgeInsets.all(16),
                     children: [
                       _summaryStrip(),
-                      const SizedBox(height: 18),
+                      const SizedBox(height: 12),
                       Text(
                         '全部骑行（${_rides.length}）',
                         style: const TextStyle(
@@ -71,7 +72,7 @@ class _RideHistoryScreenState extends State<RideHistoryScreen> {
                             fontSize: 12,
                             letterSpacing: 1),
                       ),
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 6),
                       ..._rides.map((r) => _rideCard(r)),
                     ],
                   ),
@@ -99,7 +100,7 @@ class _RideHistoryScreenState extends State<RideHistoryScreen> {
   Widget _summaryStrip() {
     final t = _totals!;
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 16),
+      padding: const EdgeInsets.symmetric(vertical: 10),
       decoration: BoxDecoration(
         color: DashColors.card,
         borderRadius: BorderRadius.circular(14),
@@ -121,8 +122,8 @@ class _RideHistoryScreenState extends State<RideHistoryScreen> {
         children: [
           Text(value,
               style: TextStyle(
-                  fontFamily: DashFonts.segClassic, fontSize: 22, color: color)),
-          const SizedBox(height: 4),
+                  fontFamily: DashFonts.segClassic, fontSize: 20, color: color)),
+          const SizedBox(height: 2),
           Text(label,
               style: const TextStyle(color: DashColors.muted, fontSize: 10)),
         ],
@@ -136,8 +137,9 @@ class _RideHistoryScreenState extends State<RideHistoryScreen> {
         MaterialPageRoute(builder: (_) => RideDetailScreen(ride: r)),
       ),
       child: Container(
-        margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.all(14),
+        key: ValueKey('ride-card-${r.id}'),
+        margin: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
           color: DashColors.card,
           borderRadius: BorderRadius.circular(14),
@@ -148,32 +150,54 @@ class _RideHistoryScreenState extends State<RideHistoryScreen> {
           children: [
             Row(
               children: [
-                const Icon(Icons.pedal_bike, color: DashColors.green, size: 18),
-                const SizedBox(width: 8),
+                const Icon(Icons.pedal_bike, color: DashColors.green, size: 16),
+                const SizedBox(width: 6),
                 Expanded(
-                  child: Text(r.name,
-                      style: const TextStyle(
-                          color: DashColors.txt,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600)),
+                  child: Row(
+                    children: [
+                      Flexible(
+                        child: Text(r.name,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                color: DashColors.txt,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600)),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        '${r.startTime.month}/${r.startTime.day} '
+                        '${_two(r.startTime.hour)}:${_two(r.startTime.minute)}',
+                        style: const TextStyle(
+                            color: DashColors.muted, fontSize: 10),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 2),
+                // IconButton 的最小点击区会把标题行撑到 40px；这里用
+                // 固定 22px 的 InkWell 保留点击语义，让卡片更紧凑。
+                SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: InkWell(
+                    key: ValueKey('delete-${r.id}'),
+                    borderRadius: BorderRadius.circular(6),
+                    onTap: () => _confirmDelete(r),
+                    child: const Icon(Icons.delete_outline,
+                        color: DashColors.red, size: 18),
+                  ),
                 ),
                 const Icon(Icons.chevron_right,
-                    color: DashColors.muted, size: 18),
+                    color: DashColors.muted, size: 16),
               ],
             ),
-            const SizedBox(height: 4),
-            Text(
-              '${r.startTime.month}月${r.startTime.day}日 '
-              '${_two(r.startTime.hour)}:${_two(r.startTime.minute)}',
-              style: const TextStyle(color: DashColors.muted, fontSize: 11),
-            ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 6),
             Row(
               children: [
-                _cell('距离', '${r.distanceKm.toStringAsFixed(2)} km'),
-                _cell('时长', r.durationLabel),
-                _cell('均速', r.avgSpeedKmh.toStringAsFixed(1)),
-                _cell('爬升', '${r.ascentM.toStringAsFixed(0)} m'),
+                _cell('距离', r.distanceKm.toStringAsFixed(2), 'km'),
+                _cell('时长', r.durationLabel, ''),
+                _cell('均速', r.avgSpeedKmh.toStringAsFixed(1), ''),
+                _cell('爬升', r.ascentM.toStringAsFixed(0), 'm'),
               ],
             ),
           ],
@@ -182,18 +206,79 @@ class _RideHistoryScreenState extends State<RideHistoryScreen> {
     );
   }
 
-  Widget _cell(String label, String value) {
+  /// 删除前二次确认，避免误触丢失骑行数据。
+  Future<void> _confirmDelete(RideSession ride) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: DashColors.card,
+        title: const Text('删除骑行记录',
+            style: TextStyle(color: DashColors.txt, fontSize: 17)),
+        content: Text(
+          '确定删除「${ride.name}」吗？\n删除后无法恢复。',
+          style: const TextStyle(color: DashColors.muted, fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            key: const ValueKey('delete-cancel'),
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            key: const ValueKey('delete-confirm'),
+            style: FilledButton.styleFrom(backgroundColor: DashColors.red),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await widget.repository.delete(ride.id);
+    await _load();
+  }
+
+  Widget _cell(String label, String value, String unit) {
     return Expanded(
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Text(value,
-              style: const TextStyle(
-                  fontFamily: DashFonts.segClassic,
-                  fontSize: 15,
-                  color: DashColors.txt)),
-          const SizedBox(height: 2),
-          Text(label,
-              style: const TextStyle(color: DashColors.muted, fontSize: 10)),
+          // 数值用 DSEG7、单位用普通字体：数字字体渲染字母会变形。
+          // 紧凑排版：单位并入标签行（仍用普通字体），四列只保留
+          // 「数值 / 标签+单位」两行，避免为无单位列多留一整行空白。
+          SizedBox(
+            height: 18,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(value,
+                  style: const TextStyle(
+                      fontFamily: DashFonts.segClassic,
+                      fontSize: 16,
+                      height: 1.0,
+                      color: DashColors.txt)),
+            ),
+          ),
+          const SizedBox(height: 1),
+          SizedBox(
+            height: 10,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Text(label,
+                    style: const TextStyle(
+                        color: DashColors.muted, fontSize: 10, height: 1.0)),
+                if (unit.isNotEmpty) ...[
+                  const SizedBox(width: 3),
+                  Text(unit,
+                      style: const TextStyle(
+                          color: DashColors.muted, fontSize: 9, height: 1.0)),
+                ],
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -217,6 +302,11 @@ class RideDetailScreen extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         children: [
           _trackMap(ride),
+          const SizedBox(height: 16),
+          SpeedElevationChart(
+            points: ride.points,
+            maxSpeedKmh: ride.maxSpeedKmh,
+          ),
           const SizedBox(height: 16),
           _metricsGrid(ride),
         ],
@@ -251,9 +341,11 @@ class RideDetailScreen extends StatelessWidget {
       ('极速', ride.maxSpeedKmh.toStringAsFixed(1), 'km/h'),
       ('爬升', ride.ascentM.toStringAsFixed(0), 'm'),
       ('下降', ride.descentM.toStringAsFixed(0), 'm'),
+      ('最高海拔', RideChartData.maxAltitude(ride.points).toStringAsFixed(0), 'm'),
       ('消耗', '${ride.calories}', 'kcal'),
     ];
     return GridView.count(
+      key: const ValueKey('ride-metrics-grid'),
       crossAxisCount: 3,
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),

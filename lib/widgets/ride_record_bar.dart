@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../services/ride_recorder.dart';
 import '../theme/dashboard_theme.dart';
+import 'slide_to_end.dart';
 
 /// 骑行记录控制条：待记录 / 记录中 / 已暂停 三态。
 ///
@@ -98,13 +99,26 @@ class RideRecordBar extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 if (onViewHistory != null)
-                  TextButton.icon(
-                    onPressed: onViewHistory,
-                    icon: Icon(Icons.history, size: 14 * scale),
-                    label: Text('历史', style: TextStyle(fontSize: 11 * scale)),
-                    style: TextButton.styleFrom(
-                        foregroundColor: DashColors.muted2,
-                        padding: EdgeInsets.symmetric(horizontal: 8 * scale)),
+                  SizedBox(
+                    height: 32 * scale,
+                    child: OutlinedButton.icon(
+                      key: const ValueKey('history-entry'),
+                      onPressed: onViewHistory,
+                      icon: Icon(Icons.history, size: 15 * scale),
+                      label: Text('骑行历史',
+                          style: TextStyle(
+                              fontSize: 12 * scale, fontWeight: FontWeight.w600)),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: DashColors.orange,
+                        side: BorderSide(
+                            color: DashColors.orange.withValues(alpha: 0.55)),
+                        backgroundColor:
+                            DashColors.orange.withValues(alpha: 0.10),
+                        padding: EdgeInsets.symmetric(horizontal: 12 * scale),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10 * scale)),
+                      ),
+                    ),
                   ),
                 if (onViewHistory != null && onConnectAssist != null)
                   Text('·', style: TextStyle(color: DashColors.muted, fontSize: 11 * scale)),
@@ -129,10 +143,6 @@ class RideRecordBar extends StatelessWidget {
   Widget _active(BuildContext context, {required bool recording}) {
     final recorder = context.watch<RideRecorder>();
     final recColor = recording ? const Color(0xFFFF4D5E) : DashColors.amber;
-    String two(int v) => v.toString().padLeft(2, '0');
-    final secs = recorder.elapsed.inSeconds;
-    final clock =
-        '${two(secs ~/ 3600)}:${two((secs % 3600) ~/ 60)}:${two(secs % 60)}';
 
     return Container(
       margin: EdgeInsets.symmetric(horizontal: 16 * scale),
@@ -154,10 +164,9 @@ class RideRecordBar extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // 状态行：红点与骑行时间已移到顶部状态栏；暂停由 GPS 速度自动判定。
           Row(
             children: [
-              _PulseDot(color: recColor, scale: scale),
-              SizedBox(width: 9 * scale),
               Text(
                 recording ? '记录中' : '已暂停',
                 style: TextStyle(
@@ -166,61 +175,30 @@ class RideRecordBar extends StatelessWidget {
                     fontWeight: FontWeight.w600,
                     letterSpacing: 1),
               ),
-              const Spacer(),
-              Text(clock, style: _segStyle(20 * scale, DashColors.txt)),
+              SizedBox(width: 8 * scale),
+              Text(
+                recording ? '移动中自动记录' : '速度低于阈值，停车自动暂停',
+                style: TextStyle(color: DashColors.muted, fontSize: 10.5 * scale),
+              ),
             ],
           ),
-          SizedBox(height: 12 * scale),
+          SizedBox(height: 10 * scale),
+          // 码表主体已有距离/均速、状态栏已有骑行时间，这里只留增量信息 + 坡度。
           Row(
             children: [
-              _metric('距离', recorder.distanceKm.toStringAsFixed(2), 'km', DashColors.green),
-              _metric('均速', recorder.avgSpeedKmh.toStringAsFixed(1), '', DashColors.blue),
+              _slopeMetric(recorder.slopePercent, scale),
               _metric('爬升', recorder.ascentM.toStringAsFixed(0), 'm', DashColors.amber),
               _metric('千卡', '${recorder.calories.round()}', '', DashColors.muted2),
             ],
           ),
-          SizedBox(height: 12 * scale),
-          Row(
-            children: [
-              Expanded(
-                child: SizedBox(
-                  height: 40 * scale,
-                  child: OutlinedButton.icon(
-                    onPressed: recording
-                        ? recorder.pause
-                        : recorder.resume,
-                    icon: Icon(
-                        recording ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                        size: 18 * scale),
-                    label: Text(recording ? '暂停' : '继续',
-                        style: TextStyle(fontSize: 13 * scale)),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: DashColors.txt,
-                      side: const BorderSide(color: DashColors.subDivider),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(11 * scale)),
-                    ),
-                  ),
-                ),
-              ),
-              SizedBox(width: 8 * scale),
-              Expanded(
-                child: SizedBox(
-                  height: 40 * scale,
-                  child: FilledButton.icon(
-                    onPressed: onFinish,
-                    icon: Icon(Icons.stop_rounded, size: 18 * scale),
-                    label: Text('结束', style: TextStyle(fontSize: 13 * scale)),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: recColor,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(11 * scale)),
-                    ),
-                  ),
-                ),
-              ),
-            ],
+          SizedBox(height: 10 * scale),
+          // 开始自动、暂停自动；「结束」改为滑动确认，防止误触。
+          SlideToEnd(
+            label: '滑动结束骑行',
+            color: recColor,
+            onConfirmed: onFinish,
+            height: 44 * scale,
+            thumbSize: 38 * scale,
           ),
         ],
       ),
@@ -248,46 +226,38 @@ class RideRecordBar extends StatelessWidget {
       ),
     );
   }
-}
 
-class _PulseDot extends StatefulWidget {
-  const _PulseDot({required this.color, required this.scale});
-  final Color color;
-  final double scale;
-
-  @override
-  State<_PulseDot> createState() => _PulseDotState();
-}
-
-class _PulseDotState extends State<_PulseDot>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _c = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 1600),
-  )..repeat();
-
-  @override
-  void dispose() {
-    _c.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return FadeTransition(
-      opacity: Tween(begin: 1.0, end: 0.35)
-          .chain(CurveTween(curve: Curves.easeInOut))
-          .animate(_c),
-      child: Container(
-        width: 11 * widget.scale,
-        height: 11 * widget.scale,
-        decoration: BoxDecoration(
-          color: widget.color,
-          shape: BoxShape.circle,
-          boxShadow: [
-            BoxShadow(color: widget.color.withValues(alpha: 0.5), blurRadius: 8),
-          ],
-        ),
+  /// 实时坡度：上坡红、下坡绿、平路蓝；无数据显示 --。
+  Widget _slopeMetric(double? percent, double scale) {
+    final has = percent != null;
+    final color = !has
+        ? DashColors.muted2
+        : percent > 1
+            ? DashColors.red
+            : percent < -1
+                ? DashColors.green
+                : DashColors.blue;
+    final text = !has
+        ? '--'
+        : '${percent > 0 ? '+' : ''}${percent.toStringAsFixed(1)}';
+    return Expanded(
+      child: Column(
+        children: [
+          Text('坡度', style: TextStyle(color: DashColors.muted, fontSize: 10 * scale)),
+          SizedBox(height: 3 * scale),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Text(text,
+                  key: const ValueKey('record-slope'),
+                  style: _segStyle(17 * scale, color)),
+              Text(' %',
+                  style: TextStyle(color: DashColors.muted, fontSize: 9 * scale)),
+            ],
+          ),
+        ],
       ),
     );
   }

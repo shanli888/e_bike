@@ -143,4 +143,68 @@ void main() {
       recorder.dispose();
     });
   });
+
+  group('SpeedAutoPause GPS 速度自动暂停判定', () {
+    test('持续低速才暂停，单帧低速不误判', () {
+      final ap = SpeedAutoPause();
+      expect(ap.feed(0), isNull);
+      expect(ap.feed(1), isNull);
+      // 中间速度带清零计数（迟滞）
+      expect(ap.feed(3.5), isNull);
+      expect(ap.lowCount, 0);
+      expect(ap.feed(1), isNull);
+      expect(ap.feed(1), isNull);
+      expect(ap.feed(1), RideRecordState.paused);
+    });
+
+    test('速度达到阈值立即继续，并清零低速计数', () {
+      final ap = SpeedAutoPause();
+      ap.feed(0);
+      ap.feed(0);
+      expect(ap.feed(6), RideRecordState.recording);
+      expect(ap.lowCount, 0);
+      // 继续后单帧低速不误暂停
+      expect(ap.feed(1), isNull);
+    });
+
+    test('reset 清空状态', () {
+      final ap = SpeedAutoPause();
+      ap.feed(0);
+      ap.feed(0);
+      expect(ap.lowCount, 2);
+      ap.reset();
+      expect(ap.lowCount, 0);
+    });
+  });
+
+  group('RideRecorder 坡度估算（GPS 高度差）', () {
+    test('坡度为高程差/水平距离百分比，夹到 ±100%', () {
+      expect(RideRecorder.computeSlopePercent(5, 100), closeTo(5, 1e-6));
+      expect(RideRecorder.computeSlopePercent(-4, 80), closeTo(-5, 1e-6));
+      expect(RideRecorder.computeSlopePercent(500, 100), 100);
+      expect(RideRecorder.computeSlopePercent(-500, 100), -100);
+    });
+
+    test('水平距离过小/过大或无有效值返回 null', () {
+      expect(RideRecorder.computeSlopePercent(3, 2), isNull);
+      expect(RideRecorder.computeSlopePercent(3, 201), isNull);
+      expect(RideRecorder.computeSlopePercent(double.nan, 50), isNull);
+    });
+
+    test('EMA 平滑：首帧直取，后续按 0.7/0.3 加权', () {
+      expect(RideRecorder.smoothSlope(null, 4), 4);
+      expect(RideRecorder.smoothSlope(4, 8), closeTo(5.2, 1e-6));
+      expect(RideRecorder.smoothSlope(-2, 2), closeTo(-0.8, 1e-6));
+    });
+
+    test('初始坡度为 null，结束复位', () async {
+      final tmp = await Directory.systemTemp.createTemp('ride_slope_test_');
+      addTearDown(() async {
+        if (await tmp.exists()) await tmp.delete(recursive: true);
+      });
+      final recorder = RideRecorder(RideRepository(dir: tmp));
+      expect(recorder.slopePercent, isNull);
+      recorder.dispose();
+    });
+  });
 }

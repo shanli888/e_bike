@@ -24,6 +24,7 @@ class SegmentNumber extends StatelessWidget {
     this.ghostColor = DashColors.segGhost,
     this.glowColor = DashColors.segGlow,
     this.showGhost = true,
+    this.fractionGhost = false,
     this.padInteger = true,
     this.fontFamily = DashFonts.segClassic,
     this.semanticsLabel,
@@ -44,6 +45,10 @@ class SegmentNumber extends StatelessWidget {
   final Color ghostColor;
   final Color glowColor;
   final bool showGhost;
+
+  /// 小数位是否绘制固定的 `8` 熄灭段底纹。默认关闭：小字号下底纹与蓝色
+  /// 光晕叠加会被看成多出一个蓝色 `8` 重影。整数位底纹不受影响。
+  final bool fractionGhost;
 
   /// 整数不足位数时是否补 0；里程不补零，高位留熄灭槽。
   final bool padInteger;
@@ -146,14 +151,15 @@ class SegmentNumber extends StatelessWidget {
     final ink = ghost
         ? (showGhost ? ghostColor : Colors.transparent)
         : (hasData ? color : ghostColor);
+    final fractionInk = ghost && !fractionGhost ? Colors.transparent : ink;
     final lit = !ghost && hasData;
 
-    TextStyle style(double size) => TextStyle(
+    TextStyle style(double size, {Color? override}) => TextStyle(
           fontFamily: fontFamily,
           fontSize: size,
           // DSEG7 的 ascent = 1000 / descent = 0，行高 1.0 时字形正好占满。
           height: 1.0,
-          color: ink,
+          color: override ?? ink,
           shadows: lit
               ? [
                   Shadow(color: glowColor, blurRadius: size * 0.188),
@@ -178,9 +184,13 @@ class SegmentNumber extends StatelessWidget {
             width: dotSize,
             height: dotSize,
             margin: EdgeInsets.only(bottom: bigH * 0.012),
-            decoration: BoxDecoration(
-              color: lit ? color : (showGhost ? ghostColor : Colors.transparent),
-              shape: BoxShape.circle,
+              decoration: BoxDecoration(
+                color: lit
+                    ? color
+                    : (ghost && !fractionGhost
+                        ? Colors.transparent
+                        : (showGhost ? ghostColor : Colors.transparent)),
+                shape: BoxShape.circle,
               boxShadow: lit
                   ? [
                       BoxShadow(
@@ -196,7 +206,7 @@ class SegmentNumber extends StatelessWidget {
           Text(
             _join(fracChars, ghost: ghost),
             key: ValueKey(ghost ? 'segment-ghost-frac' : 'segment-on-frac'),
-            style: style(smallH),
+            style: style(smallH, override: fractionInk),
           ),
         ],
       ],

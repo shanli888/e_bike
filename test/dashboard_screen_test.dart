@@ -256,16 +256,16 @@ void main() {
         findsNothing,
       );
 
-    // 助力卡与三张传感器卡按新稿命名。
+    // 助力卡与电量/温度两张传感器卡按新稿命名；坡度改由 GPS 指示，陀螺仪已移除。
     expect(find.text('助力控制'), findsOneWidget);
     expect(find.text('电量'), findsOneWidget);
     expect(find.text('温度'), findsOneWidget);
-    expect(find.text('陀螺仪'), findsOneWidget);
+    expect(find.text('陀螺仪'), findsNothing);
     expect(find.text('77%'), findsOneWidget);
     expect(find.text('38.5'), findsOneWidget);
     expect(find.text('V'), findsOneWidget);
     expect(find.text('26.5'), findsOneWidget);
-    expect(find.text('-1.2'), findsOneWidget);
+    expect(find.text('-1.2'), findsNothing);
 
     // 电量 77% 属 50~80 蓝色档，温度 26.5℃ 属 <30 绿色档；
     expect(_textColor(tester, 'battery-percent'), DashColors.blue);
@@ -973,9 +973,9 @@ void main() {
     expect(_segment(tester, 'sub-value-km').semanticsLabel, '12.7 km');
     // 演示骑行时间已移到顶部状态栏，首页不再显示。
     expect(_key('ride-time'), findsNothing);
-    // 坡度随时间循环，取注入时钟当前时刻的值。
-    expect(find.text(DemoRideData.slopeAt(now).toStringAsFixed(1)),
-        findsOneWidget);
+    // 坡度改由手机 GPS 指示，演示模式下首页也不再展示陀螺仪卡与坡度值。
+    expect(_key('gyro-card'), findsNothing);
+    expect(find.byKey(const ValueKey('slope-bar')), findsNothing);
 
     // 电量 / 电压 / 温度取当前时刻的循环值，并按同一档位规则上色。
     void expectSensorsAt(DateTime t) {
@@ -1100,17 +1100,42 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('演示模式下副速度对比开关仍联动，且使用演示副速度', (tester) async {
+  testWidgets('未连接设备（含演示模式）时副码表隐藏，切换开关不生效', (tester) async {
     final demo = DemoModeSettings();
     await demo.setEnabled(true);
     final gps = _TestGpsService();
     await tester.pumpWidget(_wrap(_screen(), BleService(), gps, demo: demo));
 
+    // 演示模式设备未连接：副码表强制隐藏，即便「副速度对比」开关打开。
     expect(_key('secondary-speed'), findsNothing);
     gps.setCompare(true);
     await tester.pump();
-    expect(_key('secondary-speed'), findsOneWidget);
-    expect(_segment(tester, 'secondary-speed').text, '23.4');
+    expect(_key('secondary-speed'), findsNothing);
+    // 主速度仍为 GPS 来源图标（未连接强制 GPS），不显示蓝牙来源图标。
+    expect(_key('primary-icon-gps'), findsOneWidget);
+    expect(_key('primary-icon-bluetooth'), findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('未连接设备时主速度强制取 GPS，副码表隐藏且切换入口不可用',
+      (tester) async {
+    final ble = BleService();
+    final gps = _TestGpsService()..setCompare(true);
+    // 设备未连接，即使服务来源设为蓝牙、且有蓝牙速度数据。
+    ble.bikeData.speed = 33.3;
+    ble.bikeData.speedAvailable = true;
+    gps.useGpsPrimary(12.5);
+    await tester.pumpWidget(_wrap(_screen(), ble, gps));
+    await tester.pump();
+
+    // 主速度取自 GPS（12.5），而非蓝牙的 33.3。
+    expect(_segment(tester, 'primary-speed').text, '12.5');
+    // 来源角标为 GPS，副码表隐藏，来源切换入口也不存在。
+    expect(_key('primary-icon-gps'), findsOneWidget);
+    expect(_key('secondary-speed'), findsNothing);
+    expect(_key('compare-speed-pill'), findsNothing);
+    expect(gps.source, SpeedSource.gps);
 
     await tester.pumpWidget(const SizedBox.shrink());
   });
@@ -1167,56 +1192,21 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('陀螺仪双向条：中心跟随方向色、下坡绿、上坡红、平路仅中心亮',
-      (tester) async {
-    final idle = Colors.white.withValues(alpha: 0.09);
+  testWidgets('传感器区只保留电量/温度两卡，陀螺仪坡度条已移除', (tester) async {
+    // 即便设备上报了陀螺仪数据，首页也不再展示坡度条与陀螺仪卡。
+    final ble = BleService();
+    ble.bikeData.clearReadOnlyAvailability();
+    ble.bikeData.slope = -12;
+    ble.bikeData.gyroAngleAvailable = true;
+    await tester.pumpWidget(
+        _wrap(_screen(), _ConnectedBleService(ble), GpsService()));
 
-    Color cell(int i) {
-      final box = tester.widget<Container>(_key('slope-segment-$i'));
-      return (box.decoration! as BoxDecoration).color!;
-    }
-
-    Future<void> pumpSlope(double? slope) async {
-      final ble = BleService();
-      ble.bikeData.clearReadOnlyAvailability();
-      if (slope != null) {
-        ble.bikeData.slope = slope;
-        ble.bikeData.gyroAngleAvailable = true;
-      }
-      await tester.pumpWidget(
-          _wrap(_screen(), _ConnectedBleService(ble), GpsService()));
-    }
-
-    // 无数据：11 格全部熄灭（灰）。
-    await pumpSlope(null);
-    expect(find.byKey(const ValueKey('slope-bar')), findsOneWidget);
-    for (var i = 0; i < 11; i++) {
-      expect(cell(i), idle, reason: '无数据时第 $i 格应熄灭');
-    }
-
-    // 下坡 -12°：level=2，中心也变绿，左侧 3/4 绿，其余灰。
-    await pumpSlope(-12);
-    expect(cell(5), DashColors.green);
-    expect(cell(3), DashColors.green);
-    expect(cell(4), DashColors.green);
-    expect(cell(6), idle, reason: '下坡时右侧不填充');
-    expect(cell(0), idle);
-
-    // 上坡 12°：level=2，中心也变红，右侧 6/7 红，其余灰。
-    await pumpSlope(12);
-    expect(cell(5), DashColors.red);
-    expect(cell(6), DashColors.red);
-    expect(cell(7), DashColors.red);
-    expect(cell(4), idle, reason: '上坡时左侧不填充');
-    expect(cell(10), idle);
-
-    // 平路 0.4°：level=0，仅中心蓝格亮。
-    await pumpSlope(0.4);
-    expect(cell(5), DashColors.blue);
-    for (var i = 0; i < 11; i++) {
-      if (i == 5) continue;
-      expect(cell(i), idle, reason: '平路时第 $i 格应熄灭');
-    }
+    expect(_key('battery-card'), findsOneWidget);
+    expect(_key('temperature-card'), findsOneWidget);
+    expect(_key('gyro-card'), findsNothing);
+    expect(find.byKey(const ValueKey('slope-bar')), findsNothing);
+    expect(find.text('陀螺仪'), findsNothing);
+    expect(find.text('-12.0'), findsNothing);
 
     await tester.pumpWidget(const SizedBox.shrink());
   });

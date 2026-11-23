@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 
 import '../models/assist_mode.dart';
@@ -24,19 +23,6 @@ import '../widgets/radial_mode_menu.dart';
 import '../widgets/ride_record_bar.dart';
 import '../widgets/needle_speedometer.dart';
 import '../widgets/segment_display.dart';
-
-/// 陀螺仪双向分段条的配置：`side` 为 -1 下坡（向左）、0 平路、1 上坡（向右），
-/// `level` 为单侧亮起的格数（0~5）；`hasData` 为 false 时全部熄灭。
-class SlopeBar {
-  const SlopeBar({
-    required this.hasData,
-    this.side = 0,
-    this.level = 0,
-  });
-  final bool hasData;
-  final int side;
-  final int level;
-}
 
 /// 主界面 - 码表显示
 ///
@@ -88,7 +74,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   /// 正在等待设备确认的指令说明（非空时禁用助力按钮）
   String? _pendingCommand;
   double? _percentDraft;
-  String _version = '--';
 
   /// 径向模式菜单是否展开。触发按钮位置由 [_modeTriggerKey] 实时测量，
   /// 作为菜单弧线的圆心（跟随助力卡内的按钮，不受布局缩放影响）。
@@ -102,6 +87,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   /// 规格基准：844 视口扣除模拟状态栏 38、标题栏 55、标签栏 66 后的内容区。
   static const double _designContentHeight = 685;
+
+  /// 码表区固定高度（基准 px）。按当前演示模式真机尺寸，原 Expanded 实际分配到
+  /// 约 307px @ scale 0.96，即设计基准 320px。改用固定高度后不再随下方内容伸缩，
+  /// 且与当前演示模式看到的码表大小一致，整页仍恰好一屏。
+  static const double _designHeroHeight = 320;
 
   /// 主速度小数位正上方的来源图标，与小数数字顶部保持的间距（基准 px）。
   /// 原先 9px 太贴字，按反馈上移到 16px。
@@ -120,16 +110,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _refreshTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
       if (mounted) setState(() {});
     });
-    unawaited(_loadVersion());
-  }
-
-  Future<void> _loadVersion() async {
-    try {
-      final info = await PackageInfo.fromPlatform();
-      if (mounted) setState(() => _version = info.version);
-    } catch (_) {
-      // 测试环境或插件不可用时保留占位符
-    }
   }
 
   @override
@@ -185,16 +165,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
             final w = constraints.maxWidth;
             final scale =
                 (h.isFinite ? h / _designContentHeight : 1.0).clamp(0.55, 1.15);
-            // 上半屏给码表：Expanded 吸收剩余空间，竖屏下自然约占一半；
-            // 扁屏（如测试 800×600）时自动收缩让位给下半，避免溢出。
-            final upper = Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Expanded(child: _buildSpeedHero(ble, gps, data, scale, demo)),
-                _buildSubTable(ble, gps, data, scale, demo,
-                    collapsed: _speedPage == 0),
-                _buildSpeedPageIndicator(scale),
-              ],
+            // 码表区高度固定为设计基准值（不再随页面高度/下方内容伸缩）：
+            // 真机竖屏下约占一半，与当前演示模式呈现的大小一致。
+            final upper = SizedBox(
+              height: _designHeroHeight * scale,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(child: _buildSpeedHero(ble, gps, data, scale, demo,
+                      deviceConnected: ble.isConnected)),
+                  _buildSubTable(ble, gps, data, scale, demo,
+                      deviceConnected: ble.isConnected,
+                      collapsed: _speedPage == 0),
+                  _buildSpeedPageIndicator(scale),
+                ],
+              ),
             );
             final lower = Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -211,24 +196,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
                 // 纯码表模式隐藏助力区；腾出的空间给记录控制条与表盘。
                 if (!isPure) _buildMergedAssistArea(ble, data, scale, demo),
-                _buildVersionLine(scale),
               ],
             );
             final content = Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Expanded(child: upper),
+                upper,
                 lower,
               ],
             );
             return DecoratedBox(
               decoration:
                   const BoxDecoration(gradient: DashColors.pageBackground),
+              // 码表区高度固定，内容总高可能超过矮屏视口，用滚动兜底避免溢出；
+              // 真机竖屏下内容恰好一屏，不会出现滚动条。
               // 径向菜单作为浮层覆盖整页，背景由菜单自身做模糊压暗。
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  content,
+                  SingleChildScrollView(child: content),
                   if (_modeMenuOpen)
                     Positioned.fill(
                       child: RadialModeMenu(
@@ -295,14 +281,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
   /// 两视图始终 Stack 叠加在各自的原位置，仅切换透明度：这样数码管视图的
   /// key / 布局坐标保持不变（既有测试与无障碍读取不受影响），同时默认呈现
   /// 用户选定的仿真指针表盘。左右滑动或按闪控左右键均可循环切换。
-  Widget _buildSpeedHero(
-      BleService ble, GpsService gps, BikeData data, double s, bool demo) {
-    final useGps = gps.source == SpeedSource.gps;
+  Widget _buildSpeedHero(BleService ble, GpsService gps, BikeData data, double s,
+      bool demo, {required bool deviceConnected}) {
+    // 未连接蓝牙设备时强制使用 GPS 主速度，且隐藏副码表、禁止来源切换；
+    // 只有连上设备后才恢复「蓝牙/GPS 可切换 + 副速度对比」的完整能力。
+    final useGps = !deviceConnected || gps.source == SpeedSource.gps;
     final value = demo
         ? data.speed
         : (useGps ? gps.speedKmh : (data.speedAvailable ? data.speed : null));
     final speedText = value?.clamp(0, 99.9).toStringAsFixed(1);
-    final showComparison = gps.comparisonEnabled;
+    final showComparison = deviceConnected && gps.comparisonEnabled;
     final secondaryValue = demo
         ? DemoRideData.secondarySpeedKmh.toStringAsFixed(1)
         : (useGps
@@ -310,8 +298,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
             : (gps.speedKmh?.toStringAsFixed(1) ?? '--'));
 
     // 表盘标线与副表采用同一套来源逻辑：演示模式固定演示 AVG/MAX；
-    // 真实模式采用对应速度来源的本地统计。
-    final markerUseGps = !demo && gps.source == SpeedSource.gps;
+    // 真实模式采用对应速度来源的本地统计（未连接设备时同样强制 GPS）。
+    final markerUseGps = !demo && (!deviceConnected || gps.source == SpeedSource.gps);
     final avgMark = demo
         ? DemoRideData.avgSpeedKmh
         : (markerUseGps
@@ -532,9 +520,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
   /// 副表：三列等宽 AVG / MAX / km，角标位于各自小数位正上方（规格 §2.4）
   Widget _buildSubTable(
       BleService ble, GpsService gps, BikeData data, double s, bool demo,
-      {bool collapsed = false}) {
+      {required bool deviceConnected, bool collapsed = false}) {
     // 演示时三列都取演示数据，忽略 GPS 主来源与真实设备的空值标记。
-    final useGps = !demo && gps.source == SpeedSource.gps;
+    // 未连接设备时强制 GPS 统计口径。
+    final useGps = !demo && (!deviceConnected || gps.source == SpeedSource.gps);
     final avg = useGps ? gps.avgSpeedKmh : data.avgSpeed;
     final max = useGps ? gps.maxSpeedKmh : data.maxSpeed;
     final trip = useGps ? gps.tripKm : data.tripDistance;
@@ -652,7 +641,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   /// 助力控制卡片：整页唯一暖色高亮块（规格 §2.5）
   /// 合并后的助力控制大区域：一个大卡片内自上而下容纳
-  /// 标题 + 模式触发按钮、滑杆控制、以及压缩的电量/温度/陀螺仪一排。
+  /// 标题（含右上角模式触发按钮）、滑杆控制、以及压缩的电量/温度一排。
   /// 内部复用既有构建方法，保留全部 key / 文本 / 语义，测试与无障碍不受影响。
   Widget _buildMergedAssistArea(
       BleService ble, BikeData data, double s, bool demo) {
@@ -687,17 +676,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  /// 传感器紧凑一排：电量 / 温度 / 陀螺仪，均复用既有卡片与 key。
-  /// 高度较独立卡片行压缩，以适配合并后的大助力区。
+  /// 传感器紧凑一排：坡度已由手机 GPS 指示，这里只保留电量 / 温度两张卡。
+  /// 去掉陀螺仪后两卡各占一半宽度，高度也进一步压缩以节省纵向空间。
   Widget _buildSensorStrip(BikeData data, double s) {
     final battery = data.batteryLevelAvailable
         ? data.batteryLevel.clamp(0, 100).toInt()
         : null;
     final voltage = data.voltage > 0 ? data.voltage.toStringAsFixed(1) : null;
     final temp = data.temperatureAvailable ? data.controllerTemperature : null;
-    final slope = data.gyroAngleAvailable ? data.slope : null;
     return SizedBox(
-      height: 109 * s,
+      height: 70 * s,
       child: Row(
         children: [
           _buildBatteryCard(battery, voltage, s),
@@ -710,22 +698,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
             segments: temp == null ? 0 : (temp / 10).round().clamp(0, 10),
             value: temp?.toStringAsFixed(1),
             unit: '℃',
-            s: s,
-          ),
-          SizedBox(width: 8 * s),
-          _buildSensorCard(
-            keyName: 'gyro',
-            title: '陀螺仪',
-            accent: DashColors.blue,
-            bar: slope == null
-                ? const SlopeBar(hasData: false)
-                : SlopeBar(
-                    hasData: true,
-                    side: slope < 0 ? -1 : (slope > 0 ? 1 : 0),
-                    level: (slope.abs() / 5).round().clamp(0, 5),
-                  ),
-            value: slope?.toStringAsFixed(1),
-            unit: '°',
             s: s,
           ),
         ],
@@ -760,24 +732,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
       children: [
         Row(
           children: [
-            Icon(Icons.directions_bike, size: 19 * s, color: DashColors.orange),
-            SizedBox(width: 8 * s),
+            Icon(Icons.directions_bike, size: 18 * s, color: DashColors.orange),
+            SizedBox(width: 6 * s),
             Text('助力控制',
                 style: TextStyle(
                     color: DashColors.txt,
-                    fontSize: 16 * s,
+                    fontSize: 15 * s,
                     fontWeight: FontWeight.w700)),
             // 手动模式在标题后实时显示当前助力百分比（含闪控按键的本地预览值）。
             if (manual) ...[
-              SizedBox(width: 8 * s),
+              SizedBox(width: 6 * s),
               Text('$percent%',
                   key: const ValueKey('assist-percent'),
                   style: TextStyle(
                       color: DashColors.orange,
-                      fontSize: 16 * s,
+                      fontSize: 15 * s,
                       fontWeight: FontWeight.w800)),
             ],
             const Spacer(),
+            // 模式触发按钮并入标题栏右上角，省去原来单独占的一行。
+            _buildModeTrigger(ble, modeEnabled, s, selected: mode, demo: demo),
           ],
         ),
         SizedBox(height: 6 * s),
@@ -789,8 +763,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
               color: hasNotice ? DashColors.orange : DashColors.green,
               fontSize: 12.5 * s),
         ),
-        SizedBox(height: 10 * s),
-        _buildModeTrigger(ble, modeEnabled, s, selected: mode, demo: demo),
         SizedBox(height: 10 * s),
         _buildControlRow(ble, controlsEnabled, manual, percent, step, s,
             demo: demo,
@@ -819,28 +791,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
             : null,
         child: Container(
           key: _modeTriggerKey,
-          height: 42 * s,
-          padding: EdgeInsets.symmetric(horizontal: 12 * s),
+          height: 30 * s,
+          padding: EdgeInsets.symmetric(horizontal: 8 * s),
           decoration: BoxDecoration(
             gradient: DashColors.modeSelected,
-            borderRadius: BorderRadius.circular(11 * s),
+            borderRadius: BorderRadius.circular(9 * s),
             border: Border.all(color: DashColors.orange.withValues(alpha: 0.48)),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(selected.icon, size: 17 * s, color: DashColors.orange),
-              SizedBox(width: 8 * s),
+              Icon(selected.icon, size: 14 * s, color: DashColors.orange),
+              SizedBox(width: 4 * s),
               Text(
                 '${selected.label}模式',
                 style: TextStyle(
                   color: DashColors.orange,
-                  fontSize: 13 * s,
+                  fontSize: 11.5 * s,
                   fontWeight: FontWeight.w700,
                 ),
               ),
-              SizedBox(width: 4 * s),
-              Icon(Icons.expand_more, size: 16 * s, color: DashColors.orange),
+              SizedBox(width: 1 * s),
+              Icon(Icons.expand_more, size: 13 * s, color: DashColors.orange),
             ],
           ),
         ),
@@ -1017,13 +989,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
       onTap: enabled ? onTap : null,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 90),
-        width: 48 * s,
-        height: 48 * s,
+        width: 38 * s,
+        height: 38 * s,
         decoration: BoxDecoration(
           color: active
               ? DashColors.orange.withValues(alpha: 0.9)
               : Colors.white.withValues(alpha: enabled ? 0.08 : 0.04),
-          borderRadius: BorderRadius.circular(11 * s),
+          borderRadius: BorderRadius.circular(10 * s),
           border: Border.all(
             color: active
                 ? DashColors.orange
@@ -1032,7 +1004,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
         ),
         child: Icon(icon,
-            size: 20 * s,
+            size: 23 * s,
             color: active
                 ? const Color(0xFF20160A)
                 : Colors.white.withValues(alpha: enabled ? 0.85 : 0.2)),
@@ -1051,7 +1023,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             '电压 ${voltage ?? '未知'} 伏',
         child: Container(
           key: const ValueKey('battery-card'),
-          padding: EdgeInsets.fromLTRB(9 * s, 10 * s, 9 * s, 9 * s),
+          padding: EdgeInsets.fromLTRB(9 * s, 6 * s, 9 * s, 6 * s),
           decoration: BoxDecoration(
             color: DashColors.card,
             borderRadius: BorderRadius.circular(13 * s),
@@ -1059,56 +1031,59 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
             children: [
+              // 一行内并排：左侧标题+档位，右侧大数值，减少纵向占用。
+              // 整行由一个 FittedBox 统一 scaleDown：窄屏下整体缩放，避免并排两块互相挤爆。
               FittedBox(
                 fit: BoxFit.scaleDown,
                 alignment: Alignment.centerLeft,
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    Text('电量',
-                        style: TextStyle(
-                            color: const Color(0xFFD6DEED),
-                            fontSize: 11.5 * s,
-                            fontWeight: FontWeight.w600)),
-                    SizedBox(width: 4 * s),
-                    Text(percent == null ? '--' : percentText,
-                        key: const ValueKey('battery-percent'),
-                        style: TextStyle(
-                            color: accent,
-                            fontSize: 13 * s,
-                            fontWeight: FontWeight.w800)),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('电量',
+                            style: TextStyle(
+                                color: const Color(0xFFD6DEED),
+                                fontSize: 11 * s,
+                                fontWeight: FontWeight.w600)),
+                        Text(percent == null ? '--' : percentText,
+                            key: const ValueKey('battery-percent'),
+                            style: TextStyle(
+                                color: accent,
+                                fontSize: 12.5 * s,
+                                fontWeight: FontWeight.w800)),
+                      ],
+                    ),
+                    SizedBox(width: 26 * s),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.baseline,
+                      textBaseline: TextBaseline.alphabetic,
+                      children: [
+                        Text(voltage ?? '--',
+                            key: const ValueKey('battery-voltage'),
+                            style: TextStyle(
+                                color: accent,
+                                fontSize: 24 * s,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: -0.5 * s)),
+                        SizedBox(width: 2 * s),
+                        Text('V',
+                            style: TextStyle(
+                                color: accent,
+                                fontSize: 12 * s,
+                                fontWeight: FontWeight.w400)),
+                      ],
+                    ),
                   ],
                 ),
               ),
-              SizedBox(height: 6 * s),
+              SizedBox(height: 4 * s),
               _buildBatteryBar(percent, accent, s),
-              const Spacer(),
-              Center(
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.baseline,
-                    textBaseline: TextBaseline.alphabetic,
-                    children: [
-                      Text(voltage ?? '--',
-                          key: const ValueKey('battery-voltage'),
-                          style: TextStyle(
-                              color: accent,
-                              fontSize: 32 * s,
-                              fontWeight: FontWeight.w600,
-                              letterSpacing: -0.5 * s)),
-                      SizedBox(width: 2 * s),
-                      Text('V',
-                          style: TextStyle(
-                              color: accent,
-                              fontSize: 15 * s,
-                              fontWeight: FontWeight.w400)),
-                    ],
-                  ),
-                ),
-              ),
             ],
           ),
         ),
@@ -1173,12 +1148,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     required String unit,
     required double s,
     String? keyName,
-    SlopeBar? bar,
   }) {
     return Expanded(
       child: Container(
         key: keyName == null ? null : ValueKey('$keyName-card'),
-        padding: EdgeInsets.fromLTRB(9 * s, 10 * s, 9 * s, 9 * s),
+        padding: EdgeInsets.fromLTRB(9 * s, 6 * s, 9 * s, 6 * s),
         decoration: BoxDecoration(
           color: DashColors.card,
           borderRadius: BorderRadius.circular(13 * s),
@@ -1186,60 +1160,60 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
           children: [
+            // 一行内并排：左侧标题+档位，右侧大数值，减少纵向占用。
+            // 整行由一个 FittedBox 统一 scaleDown：窄屏下整体缩放，避免并排两块互相挤爆。
             FittedBox(
               fit: BoxFit.scaleDown,
               alignment: Alignment.centerLeft,
               child: Row(
                 mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  Text(title,
-                      style: TextStyle(
-                          color: const Color(0xFFD6DEED),
-                          fontSize: 11.5 * s,
-                          fontWeight: FontWeight.w600)),
-                  if (badge != null) ...[
-                    SizedBox(width: 3 * s),
-                    Text(badge,
-                        style: TextStyle(
-                            color: accent,
-                            fontSize: 11.5 * s,
-                            fontWeight: FontWeight.w700)),
-                  ],
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title,
+                          style: TextStyle(
+                              color: const Color(0xFFD6DEED),
+                              fontSize: 11 * s,
+                              fontWeight: FontWeight.w600)),
+                      if (badge != null)
+                        Text(badge,
+                            style: TextStyle(
+                                color: accent,
+                                fontSize: 12.5 * s,
+                                fontWeight: FontWeight.w700)),
+                    ],
+                  ),
+                  SizedBox(width: 26 * s),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.baseline,
+                    textBaseline: TextBaseline.alphabetic,
+                    children: [
+                      Text(value ?? '--',
+                          key:
+                              keyName == null ? null : ValueKey('$keyName-value'),
+                          style: TextStyle(
+                              color: accent,
+                              fontSize: 24 * s,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: -0.5 * s)),
+                      SizedBox(width: 2 * s),
+                      Text(unit,
+                          style: TextStyle(
+                              color: accent,
+                              fontSize: 12 * s,
+                              fontWeight: FontWeight.w400)),
+                    ],
+                  ),
                 ],
               ),
             ),
-            SizedBox(height: 6 * s),
-            bar != null
-                ? _buildSlopeBar(bar, s)
-                : _buildSegmentBar(accent, segments, s),
-            const Spacer(),
-            Center(
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.baseline,
-                  textBaseline: TextBaseline.alphabetic,
-                  children: [
-                    Text(value ?? '--',
-                        key:
-                            keyName == null ? null : ValueKey('$keyName-value'),
-                        style: TextStyle(
-                            color: accent,
-                            fontSize: 32 * s,
-                            fontWeight: FontWeight.w600,
-                            letterSpacing: -0.5 * s)),
-                    SizedBox(width: 2 * s),
-                    Text(unit,
-                        style: TextStyle(
-                            color: accent,
-                            fontSize: 15 * s,
-                            fontWeight: FontWeight.w400)),
-                  ],
-                ),
-              ),
-            ),
+            SizedBox(height: 4 * s),
+            _buildSegmentBar(accent, segments, s),
           ],
         ),
       ),
@@ -1248,8 +1222,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Widget _buildSegmentBar(Color accent, int active, double s) {
     return Container(
-      height: 15 * s,
-      padding: EdgeInsets.all(3 * s),
+      height: 12 * s,
+      padding: EdgeInsets.all(2.5 * s),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.02),
         borderRadius: BorderRadius.circular(6 * s),
@@ -1269,64 +1243,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
           ),
         ),
-      ),
-    );
-  }
-
-  /// 坡度双向条：11 格，中心格（索引 5）是零点锚点。
-  ///
-  /// 无数据全灰；平路（level==0）只亮中心蓝格；下坡中心与左侧格为绿色、
-  /// 上坡中心与右侧格为红色，方向格按 [SlopeBar.level] 填充。
-  Widget _buildSlopeBar(SlopeBar bar, double s) {
-    const center = 5;
-    const total = 11;
-    final idle = Colors.white.withValues(alpha: 0.09);
-    return Container(
-      key: const ValueKey('slope-bar'),
-      height: 15 * s,
-      padding: EdgeInsets.all(3 * s),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.02),
-        borderRadius: BorderRadius.circular(6 * s),
-        border: Border.all(color: DashColors.blue.withValues(alpha: 0.34)),
-      ),
-      child: Row(
-        children: List.generate(total, (i) {
-          final directionColor =
-              bar.side < 0 ? DashColors.green : DashColors.red;
-          final isCenter = i == center;
-          final filled = bar.hasData &&
-              ((isCenter) ||
-                  (bar.side < 0 && i >= center - bar.level && i < center) ||
-                  (bar.side > 0 && i > center && i <= center + bar.level));
-          // 0 附近（level==0）只有中心格亮蓝；有坡度时中心格跟随方向色，整条同色。
-          final color = !filled
-              ? idle
-              : (bar.level == 0 ? DashColors.blue : directionColor);
-          return Expanded(
-            child: Container(
-              key: ValueKey('slope-segment-$i'),
-              margin: EdgeInsets.symmetric(horizontal: 0.6 * s),
-              decoration: BoxDecoration(
-                color: color,
-                borderRadius: BorderRadius.circular(2 * s),
-              ),
-            ),
-          );
-        }),
-      ),
-    );
-  }
-
-  Widget _buildVersionLine(double s) {
-    return Container(
-      height: 16 * s,
-      margin: EdgeInsets.only(top: 10 * s, bottom: 12 * s),
-      alignment: Alignment.center,
-      child: Text(
-        'v$_version · 2026-11-20',
-        style: TextStyle(
-            color: DashColors.muted, fontSize: 11 * s, letterSpacing: 0.6 * s),
       ),
     );
   }

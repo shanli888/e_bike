@@ -1,5 +1,6 @@
 import 'package:bike_computer/services/ble_service.dart';
 import 'package:bike_computer/services/gps_service.dart';
+import 'package:bike_computer/services/ride_recorder.dart';
 import 'package:bike_computer/services/ride_time_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -104,6 +105,52 @@ void main() {
     _advance(s, base, 0, 65);
     expect(s.display, '00:01');
     s.dispose();
+  });
+
+  group('跟随骑行记录状态（点开始即计时）', () {
+    late RideRecordState state;
+    late RideTimeService s;
+
+    setUp(() {
+      state = RideRecordState.idle;
+      s = RideTimeService(
+        isConnected: () => false,
+        speedKmh: () => 0, // 速度为 0：证明不再依赖速度
+        recordState: () => state,
+      );
+      s.tick(base);
+    });
+
+    tearDown(() => s.dispose());
+
+    test('idle 时归零不走字', () {
+      _advance(s, base, 0, 90);
+      expect(s.display, '00:00');
+      expect(s.running, isFalse);
+    });
+
+    test('点开始（recording）即使速度为 0 也走字', () {
+      state = RideRecordState.recording;
+      _advance(s, base, 0, 125); // 首 tick 已消耗 base，累计约 124s
+      expect(s.display, isNot('00:00'));
+      expect(s.running, isTrue);
+    });
+
+    test('暂停停走但保留时长，结束后归零', () {
+      state = RideRecordState.recording;
+      _advance(s, base, 0, 70);
+      final atPause = s.display;
+      expect(atPause, isNot('00:00'));
+
+      state = RideRecordState.paused;
+      _advance(s, base, 70, 60);
+      expect(s.display, atPause, reason: '暂停期间时长不变');
+      expect(s.running, isFalse);
+
+      state = RideRecordState.idle;
+      s.tick(base.add(const Duration(seconds: 131)));
+      expect(s.display, '00:00', reason: '结束后归零待命');
+    });
   });
 }
 

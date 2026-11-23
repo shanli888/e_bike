@@ -168,8 +168,8 @@ void main() {
     final appBar = find.byType(AppBar);
     final bluetooth = tester.widget<Icon>(
         find.descendant(of: appBar, matching: find.byIcon(Icons.bluetooth)));
-    // 未连接用普通蓝牙图标，颜色与首页来源图标统一为蓝色。
-    expect(bluetooth.color, DashColors.sourceBluetooth);
+    // 未连接用普通蓝牙图标，颜色与信号图标一样置灰。
+    expect(bluetooth.color, DashColors.muted);
     expect(
         find.descendant(
             of: appBar, matching: find.byIcon(Icons.bluetooth_connected)),
@@ -245,7 +245,7 @@ void main() {
     rideTime.dispose();
   });
 
-  testWidgets('演示模式下状态栏显示绿色连接信号与连接态蓝牙图标', (tester) async {
+  testWidgets('演示模式下状态栏显示绿色连接信号，但蓝牙图标按未连接置灰', (tester) async {
     SharedPreferences.setMockInitialValues({});
     tester.view.physicalSize = const Size(1080, 2340);
     tester.view.devicePixelRatio = 3.0;
@@ -262,11 +262,14 @@ void main() {
     expect(find.text('演示设备'), findsNothing);
     expect(find.text('未连接设备'), findsNothing);
     final appBar = find.byType(AppBar);
+    // 设备实际未连接：蓝牙图标保持普通形态并置灰，避免误以为已连接。
+    final bluetooth = tester.widget<Icon>(find.descendant(
+        of: appBar, matching: find.byIcon(Icons.bluetooth)));
+    expect(bluetooth.color, DashColors.muted);
     expect(
         find.descendant(
             of: appBar, matching: find.byIcon(Icons.bluetooth_connected)),
-        findsOneWidget,
-        reason: '演示态按连接成功显示蓝牙图标');
+        findsNothing);
     final signal = tester.widget<Icon>(find.byIcon(Icons.signal_cellular_alt));
     expect(signal.color, DashColors.green, reason: '演示模式也显示连接信号');
     // 演示时显示固定的演示时长。

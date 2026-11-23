@@ -135,6 +135,34 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('小数位不画 8 底纹，避免小字号下出现蓝色重影', (tester) async {
+    await tester.pumpWidget(_host(const SegmentNumber(
+      text: '08.6',
+      integerDigits: 2,
+      fractionDigits: 1,
+      height: 100,
+    )));
+    expect(_text(tester, 'segment-ghost-int').style!.color,
+        DashColors.segGhost);
+    expect(_text(tester, 'segment-ghost-frac').style!.color,
+        Colors.transparent);
+    // 点亮层仍正常显示小数位。
+    expect(_text(tester, 'segment-on-frac').data, '6');
+    expect(_text(tester, 'segment-on-frac').style!.color,
+        DashColors.segOn);
+
+    await tester.pumpWidget(_host(const SegmentNumber(
+      text: '08.6',
+      integerDigits: 2,
+      fractionDigits: 1,
+      height: 100,
+      fractionGhost: true,
+    )));
+    expect(_text(tester, 'segment-ghost-frac').style!.color,
+        DashColors.segGhost);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('showGhost 关闭时底纹层透明但保留占位', (tester) async {
     await tester.pumpWidget(_host(const SegmentNumber(
       text: '08.6',
