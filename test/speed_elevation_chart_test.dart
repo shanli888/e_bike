@@ -88,27 +88,32 @@ void main() {
           ),
         );
 
-    testWidgets('标题、图例、双轴大数字与极速一致', (tester) async {
+    testWidgets('标题与图例保留，图例在图表上方且海拔为亮蓝色', (tester) async {
       await tester.pumpWidget(wrap(_points()));
       expect(find.text('速度与海拔'), findsOneWidget);
       expect(find.text('速度'), findsOneWidget);
       expect(find.text('海拔'), findsOneWidget); // 图例
-      expect(find.text('最大速度'), findsOneWidget);
-      expect(find.text('最高海拔'), findsOneWidget);
-      // 极速取 max(轨迹 32, 汇总 35.2)
-      expect(find.byKey(const ValueKey('chart-max-speed')), findsOneWidget);
-      expect(
-          tester
-              .widget<Text>(find.byKey(const ValueKey('chart-max-speed')))
-              .data,
-          '35.2');
-      // 最高海拔 25
-      expect(
-          tester
-              .widget<Text>(find.byKey(const ValueKey('chart-max-altitude')))
-              .data,
-          '25');
+      // 面板精简：顶部两个大数字已移除
+      expect(find.text('最大速度'), findsNothing);
+      expect(find.text('最高海拔'), findsNothing);
+      expect(find.byKey(const ValueKey('chart-max-speed')), findsNothing);
+      expect(find.byKey(const ValueKey('chart-max-altitude')), findsNothing);
       expect(find.byKey(const ValueKey('chart-painter-distance')), findsOneWidget);
+
+      // 图例移到标题行：图例文字中心应高于图表绘制区中心。
+      final legendCenter = tester.getCenter(find.text('速度')).dy;
+      final chartCenter =
+          tester.getCenter(find.byKey(const ValueKey('chart-painter-distance'))).dy;
+      expect(legendCenter, lessThan(chartCenter), reason: '图例应在图表上方');
+
+      // 海拔图例色块用亮蓝色，不再是灰色 muted2。
+      final legendBox = tester.widget<Container>(
+          find.byKey(const ValueKey('legend-swatch-海拔')));
+      final legendDeco = legendBox.decoration! as BoxDecoration;
+      // 色块带半透明（面积图例 alpha 0.35），只校验 RGB 与亮蓝一致。
+      expect(legendDeco.color!.r, DashColors.blue.r);
+      expect(legendDeco.color!.g, DashColors.blue.g);
+      expect(legendDeco.color!.b, DashColors.blue.b);
     });
 
     testWidgets('距离/时间切换重建 painter', (tester) async {
@@ -134,6 +139,22 @@ void main() {
       final card = tester.widget<Container>(find.byKey(const ValueKey('speed-elevation-chart')));
       final box = card.decoration! as BoxDecoration;
       expect(box.color, DashColors.card);
+    });
+
+    testWidgets('默认高度收紧、左右贴紧边框，卡片不过高', (tester) async {
+      await tester.pumpWidget(wrap(_points()));
+      final card = find.byKey(const ValueKey('speed-elevation-chart'));
+      final cardHeight = tester.getSize(card).height;
+      // 图区默认 150 + 标题/图例与内边距 ≈ 220；旧版（含大数字）约 375。
+      expect(cardHeight, lessThan(250),
+          reason: '速度与海拔面板应比旧版（约 375）明显更矮');
+
+      // 图表渲染宽度应接近卡片宽度：左右 padding 仅 6（旧版 14）。
+      final cardWidth = tester.getSize(card).width;
+      final painterWidth =
+          tester.getSize(find.byKey(const ValueKey('chart-painter-distance'))).width;
+      expect(painterWidth / cardWidth, greaterThan(0.92),
+          reason: '图表应贴紧卡片左右边框');
     });
   });
 }

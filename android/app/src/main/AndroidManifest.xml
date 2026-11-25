@@ -1,4 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 骑行详情在线底图 -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <!-- ===== 蓝牙权限 ===== -->
     <!-- Android 11 及以下 -->
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />

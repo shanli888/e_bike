@@ -1,9 +1,13 @@
 import 'dart:math' as math;
+import 'dart:typed_data';
+import 'dart:ui' show FontFeature, ImageFilter;
 
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../models/ride_record.dart';
 import '../services/ride_repository.dart';
+import '../services/tencent_static_map.dart';
 import '../theme/dashboard_theme.dart';
 import '../widgets/speed_elevation_chart.dart';
 
@@ -54,7 +58,8 @@ class _RideHistoryScreenState extends State<RideHistoryScreen> {
         ],
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator(color: DashColors.orange))
+          ? const Center(
+              child: CircularProgressIndicator(color: DashColors.orange))
           : _rides.isEmpty
               ? _empty()
               : RefreshIndicator(
@@ -85,7 +90,8 @@ class _RideHistoryScreenState extends State<RideHistoryScreen> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.route, size: 56, color: DashColors.muted.withValues(alpha: 0.5)),
+          Icon(Icons.route,
+              size: 56, color: DashColors.muted.withValues(alpha: 0.5)),
           const SizedBox(height: 16),
           const Text('还没有骑行记录',
               style: TextStyle(color: DashColors.txt, fontSize: 16)),
@@ -122,7 +128,9 @@ class _RideHistoryScreenState extends State<RideHistoryScreen> {
         children: [
           Text(value,
               style: TextStyle(
-                  fontFamily: DashFonts.segClassic, fontSize: 20, color: color)),
+                  fontFamily: DashFonts.segClassic,
+                  fontSize: 20,
+                  color: color)),
           const SizedBox(height: 2),
           Text(label,
               style: const TextStyle(color: DashColors.muted, fontSize: 10)),
@@ -287,49 +295,368 @@ class _RideHistoryScreenState extends State<RideHistoryScreen> {
   static String _two(int v) => v.toString().padLeft(2, '0');
 }
 
-/// 骑行详情页：汇总指标 + 简易轨迹缩略图（自绘，WGS-84 等距投影）。
-class RideDetailScreen extends StatelessWidget {
-  const RideDetailScreen({super.key, required this.ride});
+/// 骑行详情页：汇总指标、曲线和轨迹地图。
+class RideDetailScreen extends StatefulWidget {
+  const RideDetailScreen({super.key, required this.ride, this.loadMap});
 
   final RideSession ride;
+  final Future<Uint8List> Function(Uri)? loadMap;
+
+  @override
+  State<RideDetailScreen> createState() => _RideDetailScreenState();
+}
+
+class _RideDetailScreenState extends State<RideDetailScreen> {
+  bool _showOnlineMap = true;
+  Uri? _mapUri;
+  Future<Uint8List>? _mapImage;
 
   @override
   Widget build(BuildContext context) {
+    final ride = widget.ride;
+    final topInset = MediaQuery.paddingOf(context).top;
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
     return Scaffold(
       backgroundColor: DashColors.bg,
-      appBar: AppBar(title: const Text('骑行详情')),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          _trackMap(ride),
-          const SizedBox(height: 16),
-          SpeedElevationChart(
-            points: ride.points,
-            maxSpeedKmh: ride.maxSpeedKmh,
-          ),
-          const SizedBox(height: 16),
-          _metricsGrid(ride),
-        ],
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final size = constraints.biggest;
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              _trackMap(ride, topInset, size),
+              _rideSheet(ride, size, topInset, bottomInset),
+              Positioned(
+                top: topInset + 8,
+                left: 16,
+                child: IconButton.filled(
+                  style: IconButton.styleFrom(
+                    backgroundColor: DashColors.card,
+                    foregroundColor: DashColors.txt,
+                  ),
+                  icon: const BackButtonIcon(),
+                  tooltip: MaterialLocalizations.of(context).backButtonTooltip,
+                  onPressed: () => Navigator.maybePop(context),
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
 
-  Widget _trackMap(RideSession ride) {
-    return Container(
-      height: 220,
-      decoration: BoxDecoration(
-        color: const Color(0xFF0E1626),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: DashColors.line),
-      ),
-      child: ride.points.length < 2
-          ? const Center(
-              child: Text('本次无轨迹点',
-                  style: TextStyle(color: DashColors.muted)))
-          : CustomPaint(
-              painter: _TrackPainter(ride.points),
-              size: Size.infinite,
+  Widget _rideSheet(
+    RideSession ride,
+    Size size,
+    double topInset,
+    double bottomInset,
+  ) {
+    const restingExtent = 0.53;
+    const handleHeight = 26.0;
+    const corners = BorderRadius.vertical(top: Radius.circular(30));
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    final highContrast = MediaQuery.highContrastOf(context);
+
+    return DraggableScrollableSheet(
+      initialChildSize: restingExtent,
+      minChildSize: restingExtent,
+      maxChildSize:
+          (1 - (topInset + 64) / size.height).clamp(restingExtent, 1.0),
+      snap: !reduceMotion,
+      snapAnimationDuration: const Duration(milliseconds: 260),
+      shouldCloseOnMinExtent: false,
+      builder: (context, scrollController) => Align(
+        alignment: Alignment.bottomCenter,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 640),
+          child: DecoratedBox(
+            key: const ValueKey('ride-detail-sheet'),
+            decoration: const BoxDecoration(
+              borderRadius: corners,
+              boxShadow: [
+                BoxShadow(
+                  color: Color(0x50000918),
+                  blurRadius: 26,
+                  offset: Offset(0, -5),
+                ),
+              ],
             ),
+            child: ClipRRect(
+              borderRadius: corners,
+              child: Stack(
+                children: [
+                  if (!highContrast)
+                    Positioned(
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      height: 80,
+                      child: ClipRect(
+                        child: BackdropFilter(
+                          filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+                          child: const SizedBox.expand(),
+                        ),
+                      ),
+                    ),
+                  if (highContrast)
+                    const Positioned.fill(
+                        child: ColoredBox(color: DashColors.bg))
+                  else ...[
+                    const Positioned.fill(
+                      top: 80,
+                      child: ColoredBox(color: DashColors.bg),
+                    ),
+                    const Positioned(
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      height: 80,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [Color(0xD9101729), DashColors.bg],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                  ListView(
+                    key: const ValueKey('ride-detail-scroll'),
+                    controller: scrollController,
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: EdgeInsets.fromLTRB(
+                      24,
+                      handleHeight + 10,
+                      24,
+                      bottomInset + 28,
+                    ),
+                    children: [
+                      _rideSummary(ride),
+                      const SizedBox(height: 22),
+                      const Text(
+                        '骑行数据',
+                        style: TextStyle(
+                          color: DashColors.txt,
+                          fontSize: 19,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      _metricsGrid(ride),
+                      const SizedBox(height: 20),
+                      SpeedElevationChart(
+                        points: ride.points,
+                        maxSpeedKmh: ride.maxSpeedKmh,
+                      ),
+                    ],
+                  ),
+                  const Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    height: handleHeight,
+                    child: IgnorePointer(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [Color(0xEB131A2B), Color(0x00131A2B)],
+                          ),
+                        ),
+                        child: Center(
+                          child: SizedBox(
+                            width: 36,
+                            height: 4,
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: Color(0xFF9AA6BC),
+                                borderRadius:
+                                    BorderRadius.all(Radius.circular(2)),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _rideSummary(RideSession ride) {
+    final date = ride.startTime;
+    final hour = date.hour.toString().padLeft(2, '0');
+    final minute = date.minute.toString().padLeft(2, '0');
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          ride.name.trim().isEmpty ? '骑行' : ride.name,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            color: DashColors.txt,
+            fontSize: 25,
+            height: 1.18,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 5),
+        Text(
+          '${date.year}年${date.month}月${date.day}日 · $hour:$minute',
+          style: const TextStyle(color: DashColors.muted2, fontSize: 13),
+        ),
+      ],
+    );
+  }
+
+  Widget _trackMap(RideSession ride, double topInset, Size size) {
+    return ColoredBox(
+      key: const ValueKey('ride-track-map'),
+      color: const Color(0xFF0E1626),
+      child: ride.points.length < 2
+          ? const Align(
+              alignment: Alignment(0, -0.5),
+              child: Text('本次无轨迹点', style: TextStyle(color: DashColors.muted)))
+          : _showOnlineMap
+              ? _onlineMap(ride.points, topInset, size)
+              : _gridMap(ride.points, topInset),
+    );
+  }
+
+  Widget _gridMap(List<RidePoint> points, double topInset,
+      {bool loading = false, bool failed = false}) {
+    return Stack(
+      children: [
+        // 网格底图 + 轨迹均由本地自绘，不依赖任何地图 SDK / key / 网络瓦片。
+        Positioned.fill(
+          child: CustomPaint(
+            key: const ValueKey('ride-track-grid'),
+            painter: _TrackPainter(points, topInset),
+          ),
+        ),
+        Positioned(
+          top: topInset + 64,
+          right: 20,
+          child: const Text('N ↑',
+              style: TextStyle(color: DashColors.muted, fontSize: 11)),
+        ),
+        Positioned(
+          right: 20,
+          top: topInset + 86,
+          child: const Text('简略网格轨迹 · 非导航地图',
+              style: TextStyle(color: DashColors.muted, fontSize: 11)),
+        ),
+        Positioned(
+          right: 12,
+          top: topInset + 8,
+          child: loading
+              ? const SizedBox.shrink()
+              : _mapLabelButton(
+                  onPressed: () => setState(() {
+                    if (failed) _mapImage = null;
+                    _showOnlineMap = true;
+                  }),
+                  label: failed ? '重试腾讯地图' : '显示腾讯地图',
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _onlineMap(List<RidePoint> points, double topInset, Size size) {
+    final mapHeight = size.height * 0.5;
+    final scale = 640 / math.max(size.width, mapHeight);
+    final uri = TencentStaticMap.forRide(
+      points,
+      width: math.max(1, (size.width * scale).round()),
+      height: math.max(1, (mapHeight * scale).round()),
+    );
+    if (_mapUri != uri || _mapImage == null) {
+      _mapUri = uri;
+      _mapImage = (widget.loadMap ?? TencentStaticMapCache.shared.load)(uri);
+    }
+    return FutureBuilder<Uint8List>(
+      key: ValueKey(uri),
+      future: _mapImage,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done ||
+            !snapshot.hasData) {
+          return _gridMap(points, topInset,
+              loading: snapshot.connectionState != ConnectionState.done,
+              failed: snapshot.hasError);
+        }
+        return _mapImageView(snapshot.requireData, topInset, mapHeight);
+      },
+    );
+  }
+
+  Widget _mapImageView(Uint8List bytes, double topInset, double mapHeight) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Positioned(
+          top: 0,
+          left: 0,
+          right: 0,
+          height: mapHeight,
+          child: Image.memory(
+            bytes,
+            key: const ValueKey('ride-tencent-map'),
+            fit: BoxFit.fill,
+          ),
+        ),
+        Positioned(
+          top: topInset + 8,
+          right: 12,
+          child: _mapLabelButton(
+            onPressed: () => setState(() => _showOnlineMap = false),
+            label: '网格轨迹',
+          ),
+        ),
+        Positioned(
+          top: topInset + 54,
+          right: 12,
+          child: _mapLabelButton(
+            onPressed: () => launchUrl(Uri.https('lbs.qq.com', '/')),
+            label: TencentStaticMap.attribution,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _mapLabelButton({
+    required String label,
+    required VoidCallback onPressed,
+  }) {
+    return TextButton(
+      style: TextButton.styleFrom(
+        foregroundColor: const Color(0xFF263746),
+        padding: EdgeInsets.zero,
+        minimumSize: const Size(44, 44),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+      onPressed: onPressed,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+          child: Text(label, style: const TextStyle(fontSize: 11)),
+        ),
+      ),
     );
   }
 
@@ -344,54 +671,77 @@ class RideDetailScreen extends StatelessWidget {
       ('最高海拔', RideChartData.maxAltitude(ride.points).toStringAsFixed(0), 'm'),
       ('消耗', '${ride.calories}', 'kcal'),
     ];
-    return GridView.count(
+    return Table(
       key: const ValueKey('ride-metrics-grid'),
-      crossAxisCount: 3,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      mainAxisSpacing: 10,
-      crossAxisSpacing: 10,
-      childAspectRatio: 1.15,
-      children: cells
-          .map((c) => Container(
-                decoration: BoxDecoration(
-                  color: DashColors.card,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: DashColors.line),
-                ),
-                padding: const EdgeInsets.all(10),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(c.$1,
+      border: const TableBorder(
+        horizontalInside: BorderSide(color: DashColors.subDivider),
+      ),
+      children: [
+        for (var i = 0; i < cells.length; i += 2)
+          TableRow(
+            children: [
+              for (var index = i; index < i + 2; index++)
+                Padding(
+                  key: ValueKey('ride-metric-$index'),
+                  padding: EdgeInsets.fromLTRB(
+                    index.isEven ? 0 : 8,
+                    8,
+                    index.isEven ? 8 : 0,
+                    9,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        cells[index].$1,
                         style: const TextStyle(
-                            color: DashColors.muted, fontSize: 11)),
-                    const SizedBox(height: 5),
-                    FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Text(c.$2,
-                          style: const TextStyle(
-                              fontFamily: DashFonts.segClassic,
-                              fontSize: 20,
-                              color: DashColors.txt)),
-                    ),
-                    if (c.$3.isNotEmpty)
-                      Text(c.$3,
-                          style: const TextStyle(
-                              color: DashColors.muted, fontSize: 9)),
-                  ],
+                          color: DashColors.muted2,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text.rich(
+                        TextSpan(
+                          text: cells[index].$2,
+                          children: [
+                            if (cells[index].$3.isNotEmpty)
+                              TextSpan(
+                                text: ' ${cells[index].$3}',
+                                style: const TextStyle(
+                                  color: DashColors.muted2,
+                                  fontSize: 12,
+                                  letterSpacing: 0,
+                                ),
+                              ),
+                          ],
+                        ),
+                        style: TextStyle(
+                          color: index == 0 ? DashColors.green : DashColors.txt,
+                          fontSize: index < 2 ? 29 : 23,
+                          height: 1.12,
+                          letterSpacing: -0.5,
+                          fontWeight: FontWeight.w600,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ))
-          .toList(),
+            ],
+          ),
+      ],
     );
   }
 }
 
 /// 等距投影轨迹绘制：把经纬度线性映射到画布局部坐标，不依赖任何地图底图/SDK。
+/// 底图是自绘的经纬网格（仅作空间参考，不含任何真实地理要素/边界/地名）。
 class _TrackPainter extends CustomPainter {
-  _TrackPainter(this.points);
+  _TrackPainter(this.points, this.topInset);
 
   final List<RidePoint> points;
+  final double topInset;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -409,21 +759,34 @@ class _TrackPainter extends CustomPainter {
     final cosLat = math.cos((minLat + maxLat) / 2 * math.pi / 180);
     final spanX = ((maxLon - minLon) * cosLat).abs();
     final spanY = (maxLat - minLat).abs();
-    final span = spanX > spanY ? spanX : spanY;
-    if (span == 0) return;
+    var span = spanX > spanY ? spanX : spanY;
+    // 两点重合时给一个默认视野，仍能画出网格底图，不至于整块空白。
+    if (span < 1e-9) {
+      span = 0.01;
+      minLon -= 0.005;
+      maxLon += 0.005;
+      minLat -= 0.005;
+      maxLat += 0.005;
+    }
     const pad = 26.0;
     final drawW = size.width - pad * 2;
-    final drawH = size.height - pad * 2;
+    final routeTop = math.min(topInset + 88, size.height * 0.28);
+    final routeBottom = size.height * 0.47;
+    final drawH = routeBottom - routeTop;
     final scale = drawW < drawH ? drawW / span : drawH / span;
     final offX = (size.width - spanX * scale) / 2;
-    final offY = (size.height - spanY * scale) / 2;
+    final offY = routeTop + (drawH - spanY * scale) / 2;
+
+    // 先画简略网格底图（视野覆盖整块画布，随轨迹范围自适应步长）。
+    _drawGrid(canvas, size, minLat, maxLat, minLon, cosLat, scale, offX, offY);
 
     Offset toOffset(RidePoint p) => Offset(
           offX + (p.lon - minLon) * cosLat * scale,
           offY + (maxLat - p.lat) * scale,
         );
 
-    final path = Path()..moveTo(toOffset(points.first).dx, toOffset(points.first).dy);
+    final path = Path()
+      ..moveTo(toOffset(points.first).dx, toOffset(points.first).dy);
     for (final p in points.skip(1)) {
       final o = toOffset(p);
       path.lineTo(o.dx, o.dy);
@@ -454,6 +817,64 @@ class _TrackPainter extends CustomPainter {
     canvas.drawCircle(end, 5, Paint()..color = const Color(0xFFFF4D5E));
   }
 
+  /// 自绘经纬度参考网格：按视野跨度取 1/2/5×10^n 的整齐步长，
+  /// 让画布上大约出现 4~8 条线。不绘制任何真实地理要素。
+  void _drawGrid(Canvas canvas, Size size, double minLat, double maxLat,
+      double minLon, double cosLat, double scale, double offX, double offY) {
+    final lonStep = _niceStep((size.width / scale / cosLat) / 6);
+    final latStep = _niceStep((size.height / scale) / 6);
+    if (lonStep <= 0 || latStep <= 0) return;
+
+    // 画布可见范围对应的经纬度（把 offX/offY 的平移反推回地理坐标）。
+    final viewMinLon = minLon - offX / (cosLat * scale);
+    final viewMaxLon = minLon + (size.width - offX) / (cosLat * scale);
+    final viewMaxLat = maxLat + offY / scale;
+    final viewMinLat = maxLat - (size.height - offY) / scale;
+
+    final minor = Paint()
+      ..color = DashColors.line.withValues(alpha: 0.6)
+      ..strokeWidth = 0.8;
+    final major = Paint()
+      ..color = DashColors.line.withValues(alpha: 0.95)
+      ..strokeWidth = 1.4;
+
+    // 竖线（经线）：lon 递增，x 随之右移。
+    var i = 0;
+    for (var lon = (viewMinLon / lonStep).floor() * lonStep;
+        lon <= viewMaxLon + 1e-12;
+        lon += lonStep, i++) {
+      final x = offX + (lon - minLon) * cosLat * scale;
+      canvas.drawLine(
+          Offset(x, 0), Offset(x, size.height), i % 5 == 0 ? major : minor);
+    }
+    // 横线（纬线）：lat 递增，y 随之上移。
+    i = 0;
+    for (var lat = (viewMinLat / latStep).floor() * latStep;
+        lat <= viewMaxLat + 1e-12;
+        lat += latStep, i++) {
+      final y = offY + (maxLat - lat) * scale;
+      canvas.drawLine(
+          Offset(0, y), Offset(size.width, y), i % 5 == 0 ? major : minor);
+    }
+  }
+
+  /// 取接近 raw 的整齐步长（1/2/5 × 10^n）。
+  static double _niceStep(double raw) {
+    if (raw <= 0 || !raw.isFinite) return 0;
+    final power = math.log(raw) / math.ln10;
+    final base = math.pow(10, power.floor()).toDouble();
+    final f = raw / base;
+    final m = f <= 1
+        ? 1.0
+        : f <= 2
+            ? 2.0
+            : f <= 5
+                ? 5.0
+                : 10.0;
+    return m * base;
+  }
+
   @override
-  bool shouldRepaint(covariant _TrackPainter old) => old.points != points;
+  bool shouldRepaint(covariant _TrackPainter old) =>
+      old.points != points || old.topInset != topInset;
 }

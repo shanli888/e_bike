@@ -1,7 +1,11 @@
+import 'dart:async';
+import 'dart:typed_data';
+
 import 'package:bike_computer/models/ride_record.dart';
 import 'package:bike_computer/screens/ride_history_screen.dart';
 import 'package:bike_computer/services/ride_repository.dart';
 import 'package:bike_computer/theme/dashboard_theme.dart';
+import 'package:bike_computer/widgets/speed_elevation_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -42,7 +46,10 @@ RideSession _ride() => RideSession(
       name: '午后骑行',
       points: [
         RidePoint(
-            lat: 31.23, lon: 121.47, alt: 12, t: DateTime(2026, 11, 21, 17, 14)),
+            lat: 31.23,
+            lon: 121.47,
+            alt: 12,
+            t: DateTime(2026, 11, 21, 17, 14)),
         RidePoint(
             lat: 31.24,
             lon: 121.48,
@@ -128,6 +135,64 @@ void main() {
     expect(tester.getCenter(find.text('km')).dy,
         closeTo(tester.getCenter(find.text('距离')).dy, 2));
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('骑行数据卡片默认贴住地图，向上拖动展开', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(MaterialApp(
+      home: RideDetailScreen(
+        ride: _ride(),
+        loadMap: (_) => Completer<Uint8List>().future,
+      ),
+    ));
+
+    final map = find.byKey(const ValueKey('ride-track-map'));
+    final sheet = find.byKey(const ValueKey('ride-detail-sheet'));
+    final scroll = find.byKey(const ValueKey('ride-detail-scroll'));
+    final chart = find.byType(SpeedElevationChart);
+    expect(tester.getSize(map), const Size(390, 844));
+    expect(tester.getSize(sheet).height, closeTo(844 * 0.53, 0.1));
+    expect(find.byKey(const ValueKey('ride-track-grid')), findsOneWidget);
+    expect(find.text('午后骑行').hitTestable(), findsOneWidget);
+    expect(find.text('12.68 km').hitTestable(), findsOneWidget);
+    expect(chart.hitTestable(), findsNothing);
+
+    await tester.drag(scroll, const Offset(0, -330));
+    await tester.pumpAndSettle();
+
+    expect(tester.getSize(sheet).height, greaterThan(700));
+    expect(chart.hitTestable(), findsOneWidget);
+    expect(tester.getSize(map), const Size(390, 844));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('在线底图请求失败后恢复网格轨迹并允许重试', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(480, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final requests = <Uri>[];
+    await tester.pumpWidget(MaterialApp(
+      home: RideDetailScreen(
+        ride: _ride(),
+        loadMap: (uri) async {
+          requests.add(uri);
+          throw StateError('Map unavailable');
+        },
+      ),
+    ));
+    final uri = requests.single;
+    expect(uri.host, 'apis.map.qq.com');
+    expect(uri.path, '/ws/staticmap/v2/');
+    expect(uri.queryParameters['path'], startsWith('color:0x3ddc8c|'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('ride-tencent-map')), findsNothing);
+    expect(find.byKey(const ValueKey('ride-track-grid')), findsOneWidget);
+    expect(find.text('重试腾讯地图'), findsOneWidget);
+    await tester.tap(find.text('重试腾讯地图'));
+    await tester.pumpAndSettle();
+    expect(requests, [uri, uri]);
   });
 
   testWidgets('删除骑行记录：二次确认后删除并刷新为空态', (tester) async {

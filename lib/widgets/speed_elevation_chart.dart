@@ -96,7 +96,7 @@ class SpeedElevationChart extends StatefulWidget {
     super.key,
     required this.points,
     this.maxSpeedKmh,
-    this.height = 224,
+    this.height = 150,
   });
 
   final List<RidePoint> points;
@@ -115,13 +115,10 @@ class _SpeedElevationChartState extends State<SpeedElevationChart> {
   @override
   Widget build(BuildContext context) {
     final samples = RideChartData.samples(widget.points);
-    final maxSpeed =
-        math.max(RideChartData.maxSpeed(widget.points), widget.maxSpeedKmh ?? 0);
-    final maxAlt = RideChartData.maxAltitude(widget.points);
 
     return Container(
       key: const ValueKey('speed-elevation-chart'),
-      padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+      padding: const EdgeInsets.fromLTRB(4, 12, 4, 10),
       decoration: BoxDecoration(
         color: DashColors.card,
         borderRadius: BorderRadius.circular(16),
@@ -137,32 +134,15 @@ class _SpeedElevationChartState extends State<SpeedElevationChart> {
                       color: DashColors.txt,
                       fontSize: 15,
                       fontWeight: FontWeight.w700)),
+              const SizedBox(width: 8),
+              const _Legend(color: DashColors.orange, label: '速度', line: true),
+              const SizedBox(width: 8),
+              const _Legend(color: DashColors.blue, label: '海拔', line: false),
               const Spacer(),
               _AxisSwitch(axis: _axis, onChanged: (a) => setState(() => _axis = a)),
             ],
           ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: _headline(
-                    keyName: 'chart-max-speed',
-                    value: maxSpeed.toStringAsFixed(1),
-                    unit: 'km/h',
-                    label: '最大速度',
-                    color: DashColors.orange),
-              ),
-              Expanded(
-                child: _headline(
-                    keyName: 'chart-max-altitude',
-                    value: maxAlt.toStringAsFixed(0),
-                    unit: 'm',
-                    label: '最高海拔',
-                    color: DashColors.muted2),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           SizedBox(
             height: widget.height,
             child: samples.length < 2
@@ -173,55 +153,15 @@ class _SpeedElevationChartState extends State<SpeedElevationChart> {
                             TextStyle(color: DashColors.muted, fontSize: 12)))
                 : CustomPaint(
                     key: ValueKey('chart-painter-${_axis.name}'),
-                    painter: _ChartPainter(samples, _axis),
+                    painter: _ChartPainter(samples, _axis, widget.maxSpeedKmh),
                     size: Size.infinite,
                   ),
-          ),
-          const SizedBox(height: 6),
-          const Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              _Legend(color: DashColors.orange, label: '速度', line: true),
-              SizedBox(width: 20),
-              _Legend(color: DashColors.muted2, label: '海拔', line: false),
-            ],
           ),
         ],
       ),
     );
   }
 
-  Widget _headline({
-    required String keyName,
-    required String value,
-    required String unit,
-    required String label,
-    required Color color,
-  }) {
-    return Column(
-      children: [
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.baseline,
-          textBaseline: TextBaseline.alphabetic,
-          children: [
-            Text(value,
-                key: ValueKey(keyName),
-                style: TextStyle(
-                    fontFamily: DashFonts.segClassic,
-                    fontSize: 26,
-                    color: color)),
-            const SizedBox(width: 4),
-            Text(unit,
-                style: const TextStyle(color: DashColors.muted, fontSize: 11)),
-          ],
-        ),
-        const SizedBox(height: 2),
-        Text(label,
-            style: const TextStyle(color: DashColors.muted, fontSize: 11)),
-      ],
-    );
-  }
 }
 
 class _AxisSwitch extends StatelessWidget {
@@ -276,8 +216,9 @@ class _Legend extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Container(
-          width: 18,
-          height: line ? 2 : 9,
+          key: ValueKey('legend-swatch-$label'),
+          width: 12,
+          height: line ? 2 : 7,
           decoration: BoxDecoration(
             color: line
                 ? color
@@ -286,22 +227,24 @@ class _Legend extends StatelessWidget {
             border: line ? null : Border.all(color: color.withValues(alpha: 0.7)),
           ),
         ),
-        const SizedBox(width: 5),
+        const SizedBox(width: 3),
         Text(label,
-            style: const TextStyle(color: DashColors.muted, fontSize: 11)),
+            style: const TextStyle(color: DashColors.muted, fontSize: 9)),
       ],
     );
   }
 }
 
 class _ChartPainter extends CustomPainter {
-  _ChartPainter(this.samples, this.axis);
+  _ChartPainter(this.samples, this.axis, this.maxSpeedKmh);
 
   final List<ChartSample> samples;
   final ChartXAxis axis;
+  final double? maxSpeedKmh;
 
-  static const left = 38.0;
-  static const right = 38.0;
+  // 左右轴刻度留白：刻度数字 fontsize 9（两位数约 12px），22px 足够且更贴边。
+  static const left = 16.0;
+  static const right = 22.0;
   static const top = 10.0;
   static const bottom = 24.0;
 
@@ -324,7 +267,8 @@ class _ChartPainter extends CustomPainter {
     for (final s in samples) {
       if (s.speedKmh > maxSpeed) maxSpeed = s.speedKmh;
     }
-    final speedTop = math.max(10.0, (maxSpeed / 10).ceil() * 10.0);
+    final axisMaxSpeed = math.max(maxSpeed, maxSpeedKmh ?? 0);
+    final speedTop = math.max(10.0, (axisMaxSpeed / 10).ceil() * 10.0);
     var minAlt = double.infinity;
     var maxAlt = double.negativeInfinity;
     for (final s in samples) {
@@ -354,10 +298,10 @@ class _ChartPainter extends CustomPainter {
       final altLabel = (altFloor + (altCeil - altFloor) * (1 - i / 4))
           .round()
           .toString();
-      _text(canvas, speedLabel, Offset(left - 5, y - 6),
+      _text(canvas, speedLabel, Offset(left - 4, y - 6),
           DashColors.orange.withValues(alpha: 0.75), 9, TextAlign.right);
-      _text(canvas, altLabel, Offset(left + w + 5, y - 6),
-          DashColors.muted2.withValues(alpha: 0.75), 9, TextAlign.left);
+      _text(canvas, altLabel, Offset(left + w + 4, y - 6),
+          DashColors.blue.withValues(alpha: 0.9), 9, TextAlign.left);
     }
 
     // 海拔灰色填充面积。
@@ -371,7 +315,7 @@ class _ChartPainter extends CustomPainter {
       ..close();
     canvas.drawPath(
       area,
-      Paint()..color = DashColors.muted2.withValues(alpha: 0.22),
+      Paint()..color = DashColors.blue.withValues(alpha: 0.28),
     );
 
     // 速度橙色折线。
@@ -417,5 +361,7 @@ class _ChartPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _ChartPainter old) =>
-      old.samples != samples || old.axis != axis;
+      old.samples != samples ||
+      old.axis != axis ||
+      old.maxSpeedKmh != maxSpeedKmh;
 }
